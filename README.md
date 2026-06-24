@@ -1,3 +1,12 @@
+---
+title: Dark Proteome Pipeline
+emoji: 🧬
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # Dark Proteome Pipeline
 
 A bioinformatics pipeline for functional annotation of uncharacterised ("dark") proteins, built as part of a BSc dissertation project. The pipeline submits protein sequences and structures to multiple remote annotation services in parallel and saves all raw results to a named output folder per protein.
