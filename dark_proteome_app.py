@@ -474,50 +474,48 @@ def main():
         st.session_state.pop("job_name", None)
         stored_id = None
 
-    # ── Upload form (shown only when no job is active) ────────────────────────
+    # ── Upload widgets (shown only when no job is active) ────────────────────
+    # NOTE: st.file_uploader must NOT be inside st.form — Streamlit clears
+    # uploader widget state on form submission, making the file appear as None
+    # in the submit handler. Plain widgets + st.button avoid this entirely.
     if not stored_id:
-        with st.form("run_form"):
-            col_fasta, col_pdb = st.columns(2)
-            with col_fasta:
-                fasta_upload = st.file_uploader(
-                    "FASTA file — InterProScan · BLASTp · Phobius · HMMER",
-                    type=["fasta", "fa", "txt"],
-                )
-            with col_pdb:
-                pdb_upload = st.file_uploader(
-                    "PDB file (optional) — FoldSeek structural search",
-                    type=["pdb"],
-                )
-            protein_name = st.text_input(
-                "Protein name",
-                placeholder="e.g. SLINKY  (defaults to filename stem if left blank)",
+        col_fasta, col_pdb = st.columns(2)
+        with col_fasta:
+            fasta_upload = st.file_uploader(
+                "FASTA file — InterProScan · BLASTp · Phobius · HMMER",
+                type=["fasta", "fa", "txt"],
             )
-            submitted = st.form_submit_button(
-                "Run Pipeline", type="primary", use_container_width=True
+        with col_pdb:
+            pdb_upload = st.file_uploader(
+                "PDB file (optional) — FoldSeek structural search",
+                type=["pdb"],
             )
+        protein_name = st.text_input(
+            "Protein name",
+            placeholder="e.g. SLINKY  (defaults to filename stem if left blank)",
+        )
 
-        if submitted:
+        if st.button("Run Pipeline", type="primary", use_container_width=True):
             if not fasta_upload and not pdb_upload:
                 st.error("Please upload at least one file.")
-                return
+            else:
+                fasta_text = fasta_upload.read().decode("utf-8") if fasta_upload else None
+                pdb_text = pdb_upload.read().decode("utf-8") if pdb_upload else None
+                name = protein_name.strip() or (
+                    Path(fasta_upload.name).stem if fasta_upload else Path(pdb_upload.name).stem
+                )
 
-            fasta_text = fasta_upload.read().decode("utf-8") if fasta_upload else None
-            pdb_text = pdb_upload.read().decode("utf-8") if pdb_upload else None
-            name = protein_name.strip() or (
-                Path(fasta_upload.name).stem if fasta_upload else Path(pdb_upload.name).stem
-            )
+                job_id = str(uuid.uuid4())
+                with _JOBS_LOCK:
+                    _JOBS[job_id] = {"done": False, "tools": {}, "name": name}
 
-            job_id = str(uuid.uuid4())
-            with _JOBS_LOCK:
-                _JOBS[job_id] = {"done": False, "tools": {}, "name": name}
+                threading.Thread(
+                    target=_job_runner, args=(job_id, fasta_text, pdb_text), daemon=True
+                ).start()
 
-            threading.Thread(
-                target=_job_runner, args=(job_id, fasta_text, pdb_text), daemon=True
-            ).start()
-
-            st.session_state["job_id"] = job_id
-            st.session_state["job_name"] = name
-            st.rerun()
+                st.session_state["job_id"] = job_id
+                st.session_state["job_name"] = name
+                st.rerun()
 
         return  # nothing more to show until a job is running
 
