@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: dark-proteome
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: EBI_EMAIL
+        sync: false
