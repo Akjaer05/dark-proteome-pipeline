@@ -2,6 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# dssp binary required by BioPython DSSP for secondary structure assignment
+RUN apt-get update && apt-get install -y --no-install-recommends dssp \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies before copying app code (better layer caching)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

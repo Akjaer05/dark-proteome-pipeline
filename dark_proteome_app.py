@@ -3,11 +3,14 @@ DarkProteome — Professional scientific annotation tool for the microbial dark 
 Run:  streamlit run dark_proteome_app.py
 """
 
+import base64
 import html as _html
 import io
 import json
+import math
 import os
 import tarfile
+import tempfile
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,6 +18,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
+from Bio.PDB import PDBParser, PDBIO
+from Bio.PDB.DSSP import DSSP
+from Bio.SeqUtils.ProtParam import ProteinAnalysis
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -718,6 +725,371 @@ def show_foldseek(tar_bytes: bytes) -> None:
             st.markdown(_html_table(df), unsafe_allow_html=True)
 
 
+# ── Structure tab — 3D viewer template ────────────────────────────────────────
+# Raw string so JS braces need no escaping; __SLOTS__ replaced at call time.
+
+_VIEWER_TMPL = r"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#0a0e1a;overflow:hidden;}
+  #viewer{width:100%;height:__HEIGHT__px;position:relative;}
+  .brow{display:flex;gap:6px;padding:9px 12px;background:#080c17;
+        border-top:1px solid #1e2d4a;align-items:center;}
+  button{background:#0d1424;color:#64748b;border:1px solid #1e2d4a;border-radius:5px;
+         padding:4px 11px;font-size:11px;cursor:pointer;
+         font-family:-apple-system,sans-serif;transition:all .15s;}
+  button:hover{background:#1e2d4a;color:#f0f6ff;}
+  button.on{background:#3b82f6;color:#fff;border-color:#3b82f6;}
+  .lbl{color:#334155;font-size:9.5px;font-weight:700;letter-spacing:.1em;
+       text-transform:uppercase;margin-right:2px;}
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<div class="brow">
+  <span class="lbl">Colour</span>
+  <button id="b0" class="on" onclick="cPLDDT()">pLDDT</button>
+  <button id="b1"            onclick="cChain()">Chain</button>
+  <button id="b2"            onclick="cHydro()">Hydrophobic</button>
+  <button id="b3"            onclick="cCharge()">Charge</button>
+</div>
+<script>
+var viewer=$3Dmol.createViewer('viewer',{backgroundColor:'#0a0e1a'});
+viewer.addModel(atob("__PDB_B64__"),'pdb');
+function act(id){
+  ['b0','b1','b2','b3'].forEach(function(b){
+    document.getElementById(b).classList.remove('on');
+  });
+  document.getElementById(id).classList.add('on');
+}
+function cPLDDT(){
+  act('b0');
+  viewer.setStyle({},{cartoon:{colorfunc:function(a){
+    return a.b>90?'#3b82f6':a.b>70?'#eab308':a.b>50?'#f97316':'#ef4444';
+  }}});
+  viewer.render();
+}
+function cChain(){
+  act('b1');
+  viewer.setStyle({},{cartoon:{colorscheme:'chain'}});
+  viewer.render();
+}
+function cHydro(){
+  act('b2');
+  var hp=['ILE','LEU','VAL','PHE','TRP','MET','ALA','TYR','CYS','PRO'];
+  viewer.setStyle({},{cartoon:{colorfunc:function(a){
+    return hp.indexOf(a.resn)>=0?'#f97316':'#3b82f6';
+  }}});
+  viewer.render();
+}
+function cCharge(){
+  act('b3');
+  var p=['LYS','ARG','HIS'],n=['ASP','GLU'];
+  viewer.setStyle({},{cartoon:{colorfunc:function(a){
+    if(p.indexOf(a.resn)>=0) return '#3b82f6';
+    if(n.indexOf(a.resn)>=0) return '#ef4444';
+    return '#475569';
+  }}});
+  viewer.render();
+}
+cPLDDT();
+viewer.zoomTo();
+viewer.zoom(1.1);
+viewer.render();
+</script>
+</body>
+</html>"""
+
+
+def _3dmol_html(pdb_text: str, height: int = 440) -> str:
+    pdb_b64 = base64.b64encode(pdb_text.encode()).decode()
+    return (_VIEWER_TMPL
+            .replace("__PDB_B64__", pdb_b64)
+            .replace("__HEIGHT__", str(height)))
+
+
+# ── Structure tab — analysis helpers ──────────────────────────────────────────
+
+def _parse_fasta_seq(fasta_text: str) -> str:
+    return "".join(
+        line.strip() for line in fasta_text.splitlines()
+        if line.strip() and not line.startswith(">")
+    ).upper()
+
+
+def _parse_pdb_plddts(pdb_text: str) -> list:
+    """Extract per-residue pLDDT scores from B-factor column (Cα atoms, first model)."""
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("p", io.StringIO(pdb_text))
+    scores = []
+    for model in structure:
+        for chain in model:
+            for res in chain:
+                if "CA" in res:
+                    scores.append(res["CA"].get_bfactor())
+        break
+    return scores
+
+
+def _calc_dssp(pdb_text: str):
+    """Return {H, E, C: pct} via DSSP, or None if the binary is unavailable."""
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("p", io.StringIO(pdb_text))
+    model = structure[0]
+    pdbio = PDBIO()
+    pdbio.set_structure(structure)
+    with tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False) as f:
+        pdbio.save(f)
+        tmppath = f.name
+    try:
+        dssp_obj = None
+        for exe in ("mkdssp", "dssp"):
+            try:
+                dssp_obj = DSSP(model, tmppath, dssp=exe)
+                break
+            except Exception:
+                continue
+        if dssp_obj is None:
+            return None
+        counts = {"H": 0, "E": 0, "C": 0}
+        for key in dssp_obj:
+            ss = dssp_obj[key][2]
+            if ss in ("H", "G", "I"):
+                counts["H"] += 1
+            elif ss in ("E", "B"):
+                counts["E"] += 1
+            else:
+                counts["C"] += 1
+        total = sum(counts.values())
+        return {k: round(v / total * 100, 1) for k, v in counts.items()} if total else None
+    except Exception:
+        return None
+    finally:
+        os.unlink(tmppath)
+
+
+def _detect_disordered(scores: list, threshold: float = 50.0, min_len: int = 5) -> list:
+    regions, in_r, start = [], False, 0
+    for i, s in enumerate(scores):
+        if s < threshold and not in_r:
+            in_r, start = True, i + 1
+        elif s >= threshold and in_r:
+            in_r = False
+            if (i - start) >= min_len:
+                regions.append((start, i))
+    if in_r and (len(scores) - start) >= min_len:
+        regions.append((start, len(scores)))
+    return regions
+
+
+def _detect_low_complexity(seq: str, window: int = 20, threshold: float = 0.65) -> list:
+    if len(seq) < window:
+        return []
+    max_ent = math.log2(min(window, 20))
+    regions, in_r, start = [], False, 0
+    for i in range(len(seq) - window + 1):
+        w = seq[i : i + window]
+        cnt: dict = {}
+        for aa in w:
+            cnt[aa] = cnt.get(aa, 0) + 1
+        norm = (-sum((c / window) * math.log2(c / window) for c in cnt.values()) / max_ent
+                if max_ent else 1)
+        if norm < threshold and not in_r:
+            in_r, start = True, i + 1
+        elif norm >= threshold and in_r:
+            in_r = False
+            regions.append((start, i + window))
+    if in_r:
+        regions.append((start, len(seq)))
+    return regions
+
+
+# ── Structure tab — HTML sub-components ───────────────────────────────────────
+
+def _plddt_bar_html(scores: list) -> str:
+    n = len(scores)
+    bands = [
+        (">90 Very high",   "#3b82f6", sum(1 for s in scores if s > 90)),
+        ("70–90 Confident", "#eab308", sum(1 for s in scores if 70 < s <= 90)),
+        ("50–70 Low",       "#f97316", sum(1 for s in scores if 50 < s <= 70)),
+        ("<50 Very low",    "#ef4444", sum(1 for s in scores if s <= 50)),
+    ]
+    segs = "".join(
+        f'<div style="flex:{c};background:{col};height:100%;min-width:3px;" '
+        f'title="{lbl}: {round(c/n*100,1) if n else 0}%"></div>'
+        for lbl, col, c in bands if c > 0
+    )
+    legend = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:4px;">'
+        f'<span style="width:9px;height:9px;border-radius:2px;background:{col};'
+        f'display:inline-block;flex-shrink:0;"></span>'
+        f'<span style="color:#475569;font-size:10.5px;">'
+        f'{lbl} ({round(c/n*100,1) if n else 0}%)</span></span>'
+        for lbl, col, c in bands
+    )
+    return (
+        '<div style="margin-top:14px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        'text-transform:uppercase;margin:0 0 8px;">pLDDT Confidence</p>'
+        '<div style="display:flex;height:12px;border-radius:4px;overflow:hidden;'
+        f'border:1px solid #1e2d4a;">{segs}</div>'
+        '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;">'
+        f'{legend}</div></div>'
+    )
+
+
+def _ss_bars_html(ss: dict) -> str:
+    items = [
+        ("Helix",       "#3b82f6", ss.get("H", 0)),
+        ("Strand",      "#22c55e", ss.get("E", 0)),
+        ("Loop / coil", "#475569", ss.get("C", 0)),
+    ]
+    rows = "".join(
+        f'<div style="margin-bottom:8px;">'
+        f'<div style="display:flex;justify-content:space-between;margin-bottom:3px;">'
+        f'<span style="color:#94a3b8;font-size:12px;">{lbl}</span>'
+        f'<span style="color:#f0f6ff;font-size:12px;font-weight:600;">{pct}%</span></div>'
+        f'<div style="background:#0d1424;border-radius:3px;height:5px;">'
+        f'<div style="background:{col};width:{pct}%;height:100%;border-radius:3px;"></div>'
+        f'</div></div>'
+        for lbl, col, pct in items
+    )
+    return (
+        '<div style="margin-top:18px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        f'text-transform:uppercase;margin:0 0 10px;">Secondary Structure</p>{rows}</div>'
+    )
+
+
+def _aa_comp_html(aa_comp: dict) -> str:
+    top10 = sorted(aa_comp.items(), key=lambda x: x[1], reverse=True)[:10]
+    mx = top10[0][1] if top10 else 1
+    rows = "".join(
+        f'<div style="display:flex;align-items:center;gap:7px;margin-bottom:4px;">'
+        f'<span style="color:#64748b;font-size:11px;font-family:monospace;'
+        f'width:14px;text-align:center;flex-shrink:0;">{aa}</span>'
+        f'<div style="flex:1;background:#0d1424;border-radius:2px;height:13px;">'
+        f'<div style="background:#3b82f6;width:{round(frac/mx*100,1)}%;height:100%;'
+        f'border-radius:2px;opacity:0.75;"></div></div>'
+        f'<span style="color:#64748b;font-size:10.5px;width:34px;text-align:right;'
+        f'flex-shrink:0;">{round(frac*100,1)}%</span></div>'
+        for aa, frac in top10
+    )
+    return (
+        '<div style="margin-top:18px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        f'text-transform:uppercase;margin:0 0 10px;">Amino Acid Composition (top 10)</p>'
+        f'{rows}</div>'
+    )
+
+
+def _features_html(scores: list, seq: str, phobius_text) -> str:
+    feats = []
+    if scores:
+        dis = _detect_disordered(scores)
+        if dis:
+            ex = ", ".join(f"{s}–{e}" for s, e in dis[:3])
+            if len(dis) > 3:
+                ex += f" (+{len(dis)-3} more)"
+            feats.append(("#f97316", "Disordered regions (pLDDT < 50)",
+                           f"{len(dis)} region(s): residues {ex}"))
+    if seq:
+        lc = _detect_low_complexity(seq)
+        if lc:
+            ex = ", ".join(f"{s}–{e}" for s, e in lc[:3])
+            if len(lc) > 3:
+                ex += f" (+{len(lc)-3} more)"
+            feats.append(("#eab308", "Low-complexity regions",
+                           f"{len(lc)} region(s): residues {ex}"))
+    if phobius_text:
+        for line in phobius_text.splitlines():
+            if not line.strip() or line.startswith("SEQENCE"):
+                continue
+            parts = line.split()
+            if len(parts) >= 3 and parts[1].isdigit():
+                tm = int(parts[1])
+                if tm > 0:
+                    feats.append(("#22c55e", "Transmembrane helices (Phobius)",
+                                   f"{tm} TM helix{'es' if tm > 1 else ''} predicted"))
+                break
+    if not feats:
+        body = ('<p style="color:#334155;font-size:12px;padding:2px 0;">'
+                'No notable structural features detected.</p>')
+    else:
+        body = "".join(
+            f'<div style="background:#080c17;border:1px solid #1e2d4a;border-radius:7px;'
+            f'padding:10px 14px;margin-bottom:8px;border-left:3px solid {col};">'
+            f'<div style="color:{col};font-size:11.5px;font-weight:600;margin-bottom:2px;">'
+            f'{title}</div>'
+            f'<div style="color:#475569;font-size:11px;">{_esc(detail)}</div></div>'
+            for col, title, detail in feats
+        )
+    return (
+        '<div style="margin-top:18px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        f'text-transform:uppercase;margin:0 0 10px;">Detected Structural Features</p>'
+        f'{body}</div>'
+    )
+
+
+# ── Structure tab — main display function ─────────────────────────────────────
+
+def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
+    plddt  = _parse_pdb_plddts(pdb_text)
+    mean_pl = round(sum(plddt) / len(plddt), 1) if plddt else 0
+    seq    = _parse_fasta_seq(fasta_text) if fasta_text else ""
+
+    seq_props = None
+    if seq:
+        try:
+            ana = ProteinAnalysis(seq)
+            seq_props = {
+                "length":  len(seq),
+                "mw_kda":  round(ana.molecular_weight() / 1000, 1),
+                "pi":      round(ana.isoelectric_point(), 2),
+                "aa_comp": ana.get_amino_acids_percent(),
+            }
+        except Exception:
+            pass
+
+    ss = _calc_dssp(pdb_text)
+
+    col_v, col_a = st.columns([5, 4])
+
+    with col_v:
+        components.html(_3dmol_html(pdb_text, height=440), height=494, scrolling=False)
+        if plddt:
+            st.markdown(_plddt_bar_html(plddt), unsafe_allow_html=True)
+
+    with col_a:
+        if seq_props:
+            st.markdown(_cards(
+                ("Amino acids", seq_props["length"],           None),
+                ("Mol. weight", f'{seq_props["mw_kda"]} kDa', None),
+                ("pI",          seq_props["pi"],               None),
+                ("Mean pLDDT",  mean_pl,                       None),
+            ), unsafe_allow_html=True)
+        else:
+            st.markdown(_cards(("Mean pLDDT", mean_pl, None)), unsafe_allow_html=True)
+
+        if ss:
+            st.markdown(_ss_bars_html(ss), unsafe_allow_html=True)
+        else:
+            st.markdown(
+                '<p style="color:#334155;font-size:11px;margin:14px 0 0;">'
+                'Secondary structure unavailable — DSSP binary not found.</p>',
+                unsafe_allow_html=True,
+            )
+
+        if seq_props:
+            st.markdown(_aa_comp_html(seq_props["aa_comp"]), unsafe_allow_html=True)
+
+        st.markdown(_features_html(plddt, seq, phobius_text), unsafe_allow_html=True)
+
+
 # ── Tool status sidebar list ───────────────────────────────────────────────────
 
 _ALL_TOOLS = ["InterProScan", "BLASTp", "Phobius", "HMMER", "FoldSeek"]
@@ -821,7 +1193,9 @@ with col_left:
                     except Exception as exc:
                         results[name] = {"ok": False, "error": str(exc)}
 
-        st.session_state["results"] = results
+        st.session_state["results"]    = results
+        st.session_state["fasta_text"] = fasta_text
+        st.session_state["pdb_text"]   = pdb_text
 
     # Status list — reads session_state so it updates after each run
     _res    = st.session_state.get("results",      {})
@@ -841,7 +1215,10 @@ with col_right:
     _res    = st.session_state.get("results",      {})
     _active = st.session_state.get("active_tools", [])
 
-    if not _res:
+    _pdb_ss   = st.session_state.get("pdb_text")
+    _fasta_ss = st.session_state.get("fasta_text")
+
+    if not _res and not _pdb_ss:
         # Empty-state placeholder
         st.markdown("""
         <div style="display:flex;flex-direction:column;align-items:center;
@@ -868,39 +1245,49 @@ with col_right:
         </div>
         """, unsafe_allow_html=True)
     else:
-        n_ok    = sum(r["ok"] for r in _res.values())
-        n_total = len(_res)
-        all_ok  = n_ok == n_total
-        bar_col = "#22c55e" if all_ok else "#f59e0b"
-        bar_bg  = "rgba(34,197,94,0.06)"  if all_ok else "rgba(245,158,11,0.06)"
-        bar_bdr = "rgba(34,197,94,0.15)"  if all_ok else "rgba(245,158,11,0.15)"
+        if _res:
+            n_ok    = sum(r["ok"] for r in _res.values())
+            n_total = len(_res)
+            all_ok  = n_ok == n_total
+            bar_col = "#22c55e" if all_ok else "#f59e0b"
+            bar_bg  = "rgba(34,197,94,0.06)"  if all_ok else "rgba(245,158,11,0.06)"
+            bar_bdr = "rgba(34,197,94,0.15)"  if all_ok else "rgba(245,158,11,0.15)"
+            st.markdown(
+                f'<div style="background:{bar_bg};border:1px solid {bar_bdr};border-radius:8px;'
+                f'padding:10px 16px;margin-bottom:18px;display:flex;align-items:center;gap:8px;">'
+                f'<span style="color:{bar_col};font-size:12.5px;font-weight:600;">'
+                f'&#x2714;&ensp;{n_ok}/{n_total} tools completed</span></div>',
+                unsafe_allow_html=True,
+            )
+            # Inline error banners for failed tools
+            for name in _active:
+                r = _res.get(name)
+                if r and not r["ok"]:
+                    st.markdown(
+                        f'<div style="background:rgba(239,68,68,0.05);'
+                        f'border:1px solid rgba(239,68,68,0.15);border-radius:6px;'
+                        f'padding:10px 14px;margin-bottom:8px;color:#ef4444;font-size:12px;">'
+                        f'<strong>{_esc(name)}</strong> — {_esc(r["error"])}</div>',
+                        unsafe_allow_html=True,
+                    )
 
-        st.markdown(
-            f'<div style="background:{bar_bg};border:1px solid {bar_bdr};border-radius:8px;'
-            f'padding:10px 16px;margin-bottom:18px;display:flex;align-items:center;gap:8px;">'
-            f'<span style="color:{bar_col};font-size:12.5px;font-weight:600;">'
-            f'&#x2714;&ensp;{n_ok}/{n_total} tools completed</span></div>',
-            unsafe_allow_html=True,
-        )
+        # Build tab list: Structure first (if PDB uploaded), then tool results
+        finished  = [t for t in _active if _res.get(t, {}).get("ok")]
+        tab_names = (["🧬 Structure"] if _pdb_ss else []) + finished
 
-        # Inline error banners for failed tools
-        for name in _active:
-            r = _res.get(name)
-            if r and not r["ok"]:
-                st.markdown(
-                    f'<div style="background:rgba(239,68,68,0.05);'
-                    f'border:1px solid rgba(239,68,68,0.15);border-radius:6px;'
-                    f'padding:10px 14px;margin-bottom:8px;color:#ef4444;font-size:12px;">'
-                    f'<strong>{_esc(name)}</strong> — {_esc(r["error"])}</div>',
-                    unsafe_allow_html=True,
-                )
-
-        # Tabbed results for completed tools
-        finished = [t for t in _active if _res.get(t, {}).get("ok")]
-        if finished:
-            tabs = st.tabs(finished)
-            for tab, name in zip(tabs, finished):
-                with tab:
+        if tab_names:
+            tabs   = st.tabs(tab_names)
+            offset = 0
+            if _pdb_ss:
+                with tabs[0]:
+                    _phobius_data = (
+                        _res["Phobius"]["data"]
+                        if _res.get("Phobius", {}).get("ok") else None
+                    )
+                    show_structure(_pdb_ss, _fasta_ss, _phobius_data)
+                offset = 1
+            for i, name in enumerate(finished):
+                with tabs[offset + i]:
                     data = _res[name]["data"]
                     if   name == "InterProScan": show_interproscan(data)
                     elif name == "BLASTp":       show_blast(data)
