@@ -1090,6 +1090,413 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
         st.markdown(_features_html(plddt, seq, phobius_text), unsafe_allow_html=True)
 
 
+# ── Domain Map tab ────────────────────────────────────────────────────────────
+
+_DB_COLORS: dict = {
+    "PFAM":             "#3b82f6",
+    "PANTHER":          "#22c55e",
+    "PROSITE_PATTERNS": "#a855f7",
+    "PROSITE_PROFILES": "#a855f7",
+    "SUPERFAMILY":      None,
+    "GENE3D":           "#0891b2",
+    "TIGRFAM":          "#f59e0b",
+    "PRINTS":           "#ec4899",
+    "PIRSF":            "#6366f1",
+    "HAMAP":            "#14b8a6",
+    "SFLD":             "#f97316",
+    "SMART":            "#84cc16",
+    "CDD":              "#fb7185",
+}
+
+_TW = 850    # track width (SVG units)
+_LM = 135    # left margin
+_RM = 15     # right margin
+_TH = 20     # track height
+_RH = 22     # row height per domain row
+
+
+def _parse_ipr_domains(data) -> list:
+    rows = []
+    for res in data.get("results", []):
+        for match in res.get("matches", []):
+            sig   = match.get("signature", {})
+            entry = sig.get("entry") or {}
+            lib   = sig.get("signatureLibraryRelease", {}).get("library", "")
+            desc  = entry.get("description") or sig.get("description") or ""
+            name  = sig.get("name", "")
+            acc   = sig.get("accession", "")
+            ev    = match.get("evalue")
+            for loc in match.get("locations", []):
+                rows.append({
+                    "db":    lib,
+                    "acc":   acc,
+                    "name":  name or acc,
+                    "desc":  desc,
+                    "start": int(loc.get("start", 0)),
+                    "end":   int(loc.get("end", 0)),
+                    "evalue": ev,
+                })
+    return sorted(rows, key=lambda d: d["start"])
+
+
+def _dssp_segments(pdb_text: str) -> list:
+    """Return [(start, end, type)] where type in H/E/C/D (D=disordered by pLDDT<50)."""
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("p", io.StringIO(pdb_text))
+    model = structure[0]
+    pdbio = PDBIO()
+    pdbio.set_structure(structure)
+    with tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False) as f:
+        pdbio.save(f)
+        tmppath = f.name
+    res_info = []
+    for chain in model:
+        for res in chain:
+            if "CA" in res:
+                res_info.append(["?", res["CA"].get_bfactor()])
+    try:
+        dssp_obj = None
+        for exe in ("mkdssp", "dssp"):
+            try:
+                dssp_obj = DSSP(model, tmppath, dssp=exe)
+                break
+            except Exception:
+                continue
+        if dssp_obj:
+            for ri, key in enumerate(dssp_obj):
+                if ri < len(res_info):
+                    res_info[ri][0] = dssp_obj[key][2]
+    except Exception:
+        pass
+    finally:
+        os.unlink(tmppath)
+    if not res_info:
+        return []
+    def _t(ss, bf):
+        if bf < 50:    return "D"
+        if ss in ("H", "G", "I"): return "H"
+        if ss in ("E", "B"):      return "E"
+        return "C"
+    segs, start, cur = [], 1, _t(*res_info[0])
+    for i, (ss, bf) in enumerate(res_info[1:], start=2):
+        t = _t(ss, bf)
+        if t != cur:
+            segs.append((start, i - 1, cur))
+            start, cur = i, t
+    segs.append((start, len(res_info), cur))
+    return segs
+
+
+_SS_COLORS = {"H": "#3b82f6", "E": "#22c55e", "C": "#334155", "D": "#ef4444"}
+_SS_LABELS = {"H": "Helix", "E": "Strand", "C": "Loop", "D": "Disordered"}
+
+
+def _plddt_segments(scores: list) -> list:
+    if not scores:
+        return []
+    def _col(s):
+        return "#3b82f6" if s > 90 else "#eab308" if s > 70 else "#f97316" if s > 50 else "#ef4444"
+    segs, start, cur = [], 1, _col(scores[0])
+    for i, s in enumerate(scores[1:], start=2):
+        c = _col(s)
+        if c != cur:
+            segs.append((start, i - 1, cur))
+            start, cur = i, c
+    segs.append((start, len(scores), cur))
+    return segs
+
+
+def _rtx_matches(seq: str) -> list:
+    """Detect RTX nonapeptide GGXGXDXUX (U = hydrophobic: ILVCFYWM)."""
+    hydro = set("ILVCFYWM")
+    out = []
+    for i in range(len(seq) - 8):
+        w = seq[i : i + 9]
+        if w[0] == "G" and w[1] == "G" and w[3] == "G" and w[5] == "D" and w[7] in hydro:
+            out.append((i + 1, i + 9))
+    return out
+
+
+def _sliding_repeats(seq: str, min_unit: int = 8, max_unit: int = 50,
+                     min_repeats: int = 3) -> list:
+    """Detect tandem repeats by sliding-window unit similarity (≥60% identity)."""
+    n = len(seq)
+    found = []
+    for unit in range(min_unit, min(max_unit + 1, n // min_repeats + 1)):
+        i = 0
+        while i + unit * min_repeats <= n:
+            ref = seq[i : i + unit]
+            count, j = 1, i + unit
+            while j + unit <= n:
+                cand = seq[j : j + unit]
+                if sum(a == b for a, b in zip(ref, cand)) / unit >= 0.6:
+                    count += 1
+                    j += unit
+                else:
+                    break
+            if count >= min_repeats:
+                found.append((i + 1, j, count, unit))
+                i = j
+            else:
+                i += 1
+    found.sort()
+    merged: list = []
+    for r in found:
+        if merged and r[0] <= merged[-1][1]:
+            if (r[1] - r[0]) > (merged[-1][1] - merged[-1][0]):
+                merged[-1] = r
+        else:
+            merged.append(r)
+    return merged
+
+
+def _svg_x(pos: int, seq_len: int) -> float:
+    return _LM + (pos - 1) / max(seq_len - 1, 1) * _TW
+
+
+def _svg_w(start: int, end: int, seq_len: int) -> float:
+    return max((end - start + 1) / max(seq_len, 1) * _TW, 3.0)
+
+
+def _svg_label(y: float, text: str) -> str:
+    return (
+        f'<text x="{_LM - 8}" y="{y + _TH / 2 + 4.5}" text-anchor="end" '
+        f'font-family="-apple-system,monospace" font-size="9.5" font-weight="700" '
+        f'fill="#3b82f6">{_esc(text)}</text>'
+    )
+
+
+def _domain_map_svg(seq_len: int, domains: list, ss_segs: list,
+                    plddt_segs: list, repeats: list, rtx: list) -> str:
+    if seq_len < 1:
+        return ""
+    els: list[str] = []
+    y = 20
+
+    # Track 1 — InterProScan domains
+    if domains:
+        rows: list[list] = []
+        for d in domains:
+            placed = False
+            for row in rows:
+                if all(d["start"] > r["end"] + 2 or d["end"] < r["start"] - 2 for r in row):
+                    row.append(d)
+                    placed = True
+                    break
+            if not placed:
+                rows.append([d])
+
+        els.append(_svg_label(y + (len(rows) * _RH) / 2 - _RH / 2, "InterProScan"))
+        for ri, row in enumerate(rows):
+            ry = y + ri * _RH
+            els.append(
+                f'<rect x="{_LM}" y="{ry + _RH/2 - 1}" width="{_TW}" height="2" '
+                f'fill="#1e2d4a" rx="1"/>'
+            )
+            for d in row:
+                col = _DB_COLORS.get(d["db"], "#475569")
+                xd  = _svg_x(d["start"], seq_len)
+                wd  = _svg_w(d["start"], d["end"], seq_len)
+                ev  = f'{d["evalue"]:.2e}' if d["evalue"] is not None else "n/a"
+                tip = f'{_esc(d["name"])} ({d["db"]})\nResidues {d["start"]}–{d["end"]}\nE-value: {ev}'
+                fill_attr = f'fill="{col}" opacity="0.85"' if col else 'fill="none" stroke="#3b82f6" stroke-width="1.5"'
+                els.append(
+                    f'<rect x="{xd:.1f}" y="{ry + 3}" width="{wd:.1f}" '
+                    f'height="{_RH - 6}" rx="3" {fill_attr}>'
+                    f'<title>{tip}</title></rect>'
+                )
+                if wd > 40:
+                    lbl = d["name"][:12] + ("…" if len(d["name"]) > 12 else "")
+                    els.append(
+                        f'<text x="{xd + wd/2:.1f}" y="{ry + _RH/2 + 3.5}" '
+                        f'text-anchor="middle" font-size="7.5" fill="#f0f6ff" '
+                        f'font-family="-apple-system,sans-serif" pointer-events="none">'
+                        f'{_esc(lbl)}</text>'
+                    )
+        y += len(rows) * _RH + 12
+
+    # Track 2 — Secondary structure
+    if ss_segs:
+        els.append(_svg_label(y, "Sec. structure"))
+        els.append(f'<rect x="{_LM}" y="{y}" width="{_TW}" height="{_TH}" rx="3" fill="#0d1424"/>')
+        for s, e, t in ss_segs:
+            xd = _svg_x(s, seq_len)
+            wd = _svg_w(s, e, seq_len)
+            els.append(
+                f'<rect x="{xd:.1f}" y="{y}" width="{wd:.1f}" height="{_TH}" '
+                f'fill="{_SS_COLORS[t]}"><title>{_SS_LABELS[t]} ({s}–{e})</title></rect>'
+            )
+        y += _TH + 10
+
+    # Track 3 — pLDDT
+    if plddt_segs:
+        els.append(_svg_label(y, "pLDDT"))
+        els.append(f'<rect x="{_LM}" y="{y}" width="{_TW}" height="{_TH}" rx="3" fill="#0d1424"/>')
+        for s, e, col in plddt_segs:
+            xd = _svg_x(s, seq_len)
+            wd = _svg_w(s, e, seq_len)
+            els.append(
+                f'<rect x="{xd:.1f}" y="{y}" width="{wd:.1f}" height="{_TH}" fill="{col}">'
+                f'<title>pLDDT {s}–{e}</title></rect>'
+            )
+        y += _TH + 10
+
+    # Track 4 — Repeats
+    rtx_entries  = [(s, e, f"RTX motif ({s}–{e})", "#a855f7") for s, e in rtx]
+    rep_entries  = [(s, e, f"{cnt}× repeat (unit ~{unit} aa)", "#f59e0b")
+                    for s, e, cnt, unit in repeats]
+    all_rep = rtx_entries + rep_entries
+    if all_rep:
+        els.append(_svg_label(y, "Repeats"))
+        els.append(f'<rect x="{_LM}" y="{y}" width="{_TW}" height="{_TH}" rx="3" fill="#0d1424"/>')
+        for s, e, label, col in all_rep:
+            xd = _svg_x(s, seq_len)
+            wd = _svg_w(s, e, seq_len)
+            els.append(
+                f'<rect x="{xd:.1f}" y="{y}" width="{wd:.1f}" height="{_TH}" '
+                f'rx="2" fill="{col}" opacity="0.85"><title>{_esc(label)}</title></rect>'
+            )
+            if wd > 35:
+                short = label[:14] + ("…" if len(label) > 14 else "")
+                els.append(
+                    f'<text x="{xd + wd/2:.1f}" y="{y + _TH/2 + 3.5}" '
+                    f'text-anchor="middle" font-size="7.5" fill="#f0f6ff" '
+                    f'font-family="-apple-system,sans-serif" pointer-events="none">'
+                    f'{_esc(short)}</text>'
+                )
+        y += _TH + 12
+
+    # Ruler
+    tick_step = max(1, round(seq_len / 15 / 10) * 10)
+    ticks = list(range(1, seq_len + 1, tick_step))
+    if seq_len not in ticks:
+        ticks.append(seq_len)
+    els.append(
+        f'<line x1="{_LM}" y1="{y}" x2="{_LM + _TW}" y2="{y}" '
+        f'stroke="#1e2d4a" stroke-width="1"/>'
+    )
+    for t in ticks:
+        tx = _svg_x(t, seq_len)
+        els.append(
+            f'<line x1="{tx:.1f}" y1="{y}" x2="{tx:.1f}" y2="{y + 5}" '
+            f'stroke="#1e2d4a" stroke-width="1"/>'
+        )
+        anchor = "start" if t == 1 else ("end" if t == seq_len else "middle")
+        els.append(
+            f'<text x="{tx:.1f}" y="{y + 15}" text-anchor="{anchor}" '
+            f'font-size="9" fill="#334155" font-family="-apple-system,monospace">{t}</text>'
+        )
+
+    total_h = y + 25
+    vb_w = _LM + _TW + _RM
+    bg = (
+        f'<rect width="{vb_w}" height="{total_h}" fill="#080c17"/>'
+        f'<rect x="{_LM}" y="0" width="{_TW}" height="{total_h}" fill="#0a0e1a"/>'
+    )
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {vb_w} {total_h}" '
+        f'width="100%" style="display:block;">{bg}{"".join(els)}</svg>'
+    )
+
+
+def _chip(text: str, col: str = "#334155") -> str:
+    return (
+        f'<span style="display:inline-flex;align-items:center;'
+        f'background:{col}22;border:1px solid {col}55;border-radius:999px;'
+        f'padding:3px 10px;font-size:11px;color:{col};font-weight:500;'
+        f'font-family:-apple-system,sans-serif;">{_esc(text)}</span>'
+    )
+
+
+def show_domain_map(ipr_data, pdb_text, fasta_text) -> None:
+    domains    = _parse_ipr_domains(ipr_data) if ipr_data else []
+    plddt      = _parse_pdb_plddts(pdb_text)  if pdb_text  else []
+    ss_segs    = _dssp_segments(pdb_text)      if pdb_text  else []
+    seq        = _parse_fasta_seq(fasta_text)  if fasta_text else ""
+    rtx        = _rtx_matches(seq)             if seq else []
+    repeats    = _sliding_repeats(seq)         if seq else []
+    seq_len    = (
+        len(seq)
+        or (max(d["end"] for d in domains) if domains else 0)
+        or len(plddt)
+    )
+
+    if seq_len == 0:
+        st.markdown('<p style="color:#334155;">No sequence data available.</p>',
+                    unsafe_allow_html=True)
+        return
+
+    plddt_segs = _plddt_segments(plddt)
+    svg        = _domain_map_svg(seq_len, domains, ss_segs, plddt_segs, repeats, rtx)
+
+    st.markdown(
+        '<div style="background:#080c17;border:1px solid #1e2d4a;border-radius:10px;'
+        f'padding:18px 16px 10px;overflow-x:auto;">{svg}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Legend
+    legend_items = [
+        ("PFAM", "#3b82f6"), ("PANTHER", "#22c55e"), ("PROSITE", "#a855f7"),
+        ("GENE3D", "#0891b2"), ("SUPERFAMILY", None), ("Other", "#475569"),
+    ]
+    legend_html = " ".join(
+        f'<span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px;">'
+        f'<span style="width:8px;height:8px;border-radius:2px;'
+        f'{"background:" + col + ";" if col else "border:1px solid #3b82f6;"}'
+        f'display:inline-block;"></span>'
+        f'<span style="color:#475569;font-size:10.5px;">{lbl}</span></span>'
+        for lbl, col in legend_items
+    )
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:10px;">'
+        f'{legend_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Summary cards
+    n_domains = len(set(f'{d["db"]}:{d["acc"]}' for d in domains))
+    n_rep     = len(rtx) + sum(r[2] for r in repeats)
+    dis_len   = (
+        sum(e - s + 1 for s, e, t in ss_segs if t == "D") if ss_segs
+        else sum(1 for s in plddt if s < 50)
+    )
+    pct_high  = round(sum(1 for s in plddt if s > 70) / len(plddt) * 100, 1) if plddt else 0
+
+    st.markdown(_cards(
+        ("Domains found",       n_domains,       None),
+        ("Repeat units",        n_rep,           None),
+        ("Disordered residues", dis_len,         None),
+        ("% high confidence",   f"{pct_high}%",  None),
+    ), unsafe_allow_html=True)
+
+    # Feature chips
+    chip_parts = []
+    if n_domains:
+        db_counts: dict = {}
+        for d in domains:
+            db_counts[d["db"]] = db_counts.get(d["db"], 0) + 1
+        chip_parts.append(_chip(f'{n_domains} domain annotation(s)', "#3b82f6"))
+        chip_parts.append(_chip(f'Most hits: {max(db_counts, key=db_counts.get)}', "#0891b2"))
+    if rtx:
+        chip_parts.append(_chip(f'{len(rtx)} RTX motif(s)', "#a855f7"))
+    if repeats:
+        chip_parts.append(_chip(f'{len(repeats)} tandem repeat region(s)', "#f59e0b"))
+    if dis_len > 10:
+        chip_parts.append(_chip(f'{dis_len} disordered residues', "#ef4444"))
+    if pct_high >= 70:
+        chip_parts.append(_chip(f'{pct_high}% high-confidence structure', "#22c55e"))
+    elif 0 < pct_high <= 30:
+        chip_parts.append(_chip(f'Low overall confidence ({pct_high}%)', "#f97316"))
+
+    if chip_parts:
+        st.markdown(
+            '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;">'
+            + "".join(chip_parts) + "</div>",
+            unsafe_allow_html=True,
+        )
+
+
 # ── Tool status sidebar list ───────────────────────────────────────────────────
 
 _ALL_TOOLS = ["InterProScan", "BLASTp", "Phobius", "HMMER", "FoldSeek"]
@@ -1271,21 +1678,33 @@ with col_right:
                         unsafe_allow_html=True,
                     )
 
-        # Build tab list: Structure first (if PDB uploaded), then tool results
-        finished  = [t for t in _active if _res.get(t, {}).get("ok")]
-        tab_names = (["🧬 Structure"] if _pdb_ss else []) + finished
+        # Build tab list: Structure → Domain Map → tool results
+        finished        = [t for t in _active if _res.get(t, {}).get("ok")]
+        _has_ipr        = _res.get("InterProScan", {}).get("ok")
+        _has_domain_map = bool(_pdb_ss or _has_ipr)
+
+        tab_names = (
+            (["🧬 Structure"]   if _pdb_ss          else []) +
+            (["🗺️ Domain Map"]  if _has_domain_map  else []) +
+            finished
+        )
 
         if tab_names:
             tabs   = st.tabs(tab_names)
             offset = 0
             if _pdb_ss:
-                with tabs[0]:
+                with tabs[offset]:
                     _phobius_data = (
                         _res["Phobius"]["data"]
                         if _res.get("Phobius", {}).get("ok") else None
                     )
                     show_structure(_pdb_ss, _fasta_ss, _phobius_data)
-                offset = 1
+                offset += 1
+            if _has_domain_map:
+                with tabs[offset]:
+                    _ipr_data = _res["InterProScan"]["data"] if _has_ipr else None
+                    show_domain_map(_ipr_data, _pdb_ss, _fasta_ss)
+                offset += 1
             for i, name in enumerate(finished):
                 with tabs[offset + i]:
                     data = _res[name]["data"]
