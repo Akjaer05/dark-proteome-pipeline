@@ -10,9 +10,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY dark_proteome_app.py .
 COPY .streamlit/ .streamlit/
 
-# Render injects PORT; default to 8501 for local docker run
-ENV PORT=8501
+# HuggingFace Spaces requires 7860; Render overrides $PORT at runtime
+ENV PORT=7860
 
-EXPOSE $PORT
+EXPOSE 7860
 
 CMD ["sh", "-c", "streamlit run dark_proteome_app.py --server.port=$PORT --server.address=0.0.0.0"]
