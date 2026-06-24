@@ -175,6 +175,40 @@ def run_phobius(fasta_path: Path, out_dir: Path, name: str) -> Path:
     return out
 
 
+# ── HMMER hmmscan ─────────────────────────────────────────────────────────────
+
+_HMMER = "https://www.ebi.ac.uk/Tools/services/rest/hmmer3_hmmscan"
+
+
+def run_hmmer(fasta_path: Path, out_dir: Path, name: str) -> Path:
+    TAG = "HMMER"
+    log(TAG, "Submitting...")
+
+    r = requests.post(f"{_HMMER}/run", data={
+        "email": EMAIL, "sequence": fasta_path.read_text(),
+        "database": "pfam", "E": "1.0",
+    })
+    r.raise_for_status()
+    job_id = r.text.strip()
+    log(TAG, f"Job: {job_id}")
+
+    while True:
+        status = requests.get(f"{_HMMER}/status/{job_id}").text.strip()
+        log(TAG, status)
+        if status in ("FINISHED", "FAILURE", "ERROR", "NOT_FOUND", "CANCELLED"):
+            break
+        time.sleep(10)
+
+    if status != "FINISHED":
+        raise RuntimeError(f"Job ended with status '{status}'")
+
+    result = requests.get(f"{_HMMER}/result/{job_id}/out").text
+    out = out_dir / f"hmmer_{job_id}.txt"
+    out.write_text(result)
+    log(TAG, f"Saved -> {out.name}")
+    return out
+
+
 # ── FoldSeek ──────────────────────────────────────────────────────────────────
 
 _FS = "https://search.foldseek.com/api"
@@ -231,7 +265,7 @@ def main() -> None:
         )
     )
     parser.add_argument("--fasta", type=Path,
-                        help="FASTA file -> InterProScan, BLASTp, Phobius")
+                        help="FASTA file -> InterProScan, BLASTp, Phobius, HMMER")
     parser.add_argument("--pdb",   type=Path,
                         help="PDB file  -> FoldSeek")
     parser.add_argument("--name",
@@ -265,6 +299,7 @@ def main() -> None:
         tasks["InterProScan"] = (run_interproscan, args.fasta)
         tasks["BLASTp"]       = (run_blast,        args.fasta)
         tasks["Phobius"]      = (run_phobius,       args.fasta)
+        tasks["HMMER"]        = (run_hmmer,         args.fasta)
     if args.pdb:
         tasks["FoldSeek"]     = (run_foldseek, args.pdb)
 
