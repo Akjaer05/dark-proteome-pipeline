@@ -356,7 +356,7 @@ st.markdown(f"""
 def _ebi_poll(base_url, job_id):
     terminal = {"FINISHED", "FAILURE", "ERROR", "NOT_FOUND", "CANCELLED"}
     while True:
-        r = requests.get(f"{base_url}/status/{job_id}", timeout=30)
+        r = requests.get(f"{base_url}/status/{job_id}", timeout=60)
         r.raise_for_status()
         s = r.text.strip()
         if s in terminal:
@@ -366,90 +366,111 @@ def _ebi_poll(base_url, job_id):
 
 def run_interproscan(sequence):
     url = "https://www.ebi.ac.uk/Tools/services/rest/iprscan5"
-    r = requests.post(f"{url}/run", data={
-        "email": EMAIL, "sequence": sequence,
-        "goterms": "true", "pathways": "true", "stype": "p",
-    }, timeout=30)
-    r.raise_for_status()
-    jid = r.text.strip()
-    if _ebi_poll(url, jid) != "FINISHED":
-        raise RuntimeError("Job did not finish successfully")
-    r = requests.get(f"{url}/result/{jid}/json",
-                     headers={"Accept": "application/json"}, timeout=60)
-    r.raise_for_status()
-    return r.json()
+    try:
+        r = requests.post(f"{url}/run", data={
+            "email": EMAIL, "sequence": sequence,
+            "goterms": "true", "pathways": "true", "stype": "p",
+        }, timeout=60)
+        r.raise_for_status()
+        jid = r.text.strip()
+        if _ebi_poll(url, jid) != "FINISHED":
+            raise RuntimeError("Job did not finish successfully")
+        r = requests.get(f"{url}/result/{jid}/json",
+                         headers={"Accept": "application/json"}, timeout=120)
+        r.raise_for_status()
+        return r.json()
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            "InterProScan timed out — EBI servers may be slow. Try again in a few minutes."
+        )
 
 
 def run_blast(sequence):
     url = "https://blast.ncbi.nlm.nih.gov/blast/Blast.cgi"
-    r = requests.put(url, params={
-        "CMD": "Put", "PROGRAM": "blastp", "DATABASE": "nr",
-        "QUERY": sequence, "FORMAT_TYPE": "JSON2",
-        "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-    }, timeout=30)
-    r.raise_for_status()
-    rid, rtoe = None, 30
-    for line in r.text.splitlines():
-        if line.startswith("    RID = "):
-            rid = line.split("=", 1)[1].strip()
-        elif line.startswith("    RTOE = "):
-            rtoe = int(line.split("=", 1)[1].strip())
-    if not rid:
-        raise RuntimeError("No RID in NCBI response")
-    time.sleep(rtoe)
-    while True:
-        r = requests.get(url, params={
-            "CMD": "Get", "RID": rid, "FORMAT_OBJECT": "SearchInfo",
+    try:
+        r = requests.put(url, params={
+            "CMD": "Put", "PROGRAM": "blastp", "DATABASE": "nr",
+            "QUERY": sequence, "FORMAT_TYPE": "JSON2",
             "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-        }, timeout=30)
-        status = "UNKNOWN"
+        }, timeout=60)
+        r.raise_for_status()
+        rid, rtoe = None, 30
         for line in r.text.splitlines():
-            if "Status=" in line:
-                status = line.strip().split("=", 1)[1].strip()
+            if line.startswith("    RID = "):
+                rid = line.split("=", 1)[1].strip()
+            elif line.startswith("    RTOE = "):
+                rtoe = int(line.split("=", 1)[1].strip())
+        if not rid:
+            raise RuntimeError("No RID in NCBI response")
+        time.sleep(rtoe)
+        while True:
+            r = requests.get(url, params={
+                "CMD": "Get", "RID": rid, "FORMAT_OBJECT": "SearchInfo",
+                "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
+            }, timeout=60)
+            status = "UNKNOWN"
+            for line in r.text.splitlines():
+                if "Status=" in line:
+                    status = line.strip().split("=", 1)[1].strip()
+                    break
+            if status in ("READY", "FAILED", "UNKNOWN"):
                 break
-        if status in ("READY", "FAILED", "UNKNOWN"):
-            break
-        time.sleep(10)
-    if status != "READY":
-        raise RuntimeError(f"BLAST status: {status}")
-    r = requests.get(url, params={
-        "CMD": "Get", "RID": rid, "FORMAT_TYPE": "JSON2",
-        "DESCRIPTIONS": 10, "ALIGNMENTS": 10,
-        "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-    }, timeout=60)
-    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
-        names = [n for n in zf.namelist() if n.endswith(".json")]
-        return json.loads(zf.read(names[0]))
+            time.sleep(10)
+        if status != "READY":
+            raise RuntimeError(f"BLAST status: {status}")
+        r = requests.get(url, params={
+            "CMD": "Get", "RID": rid, "FORMAT_TYPE": "JSON2",
+            "DESCRIPTIONS": 10, "ALIGNMENTS": 10,
+            "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
+        }, timeout=300)
+        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+            names = [n for n in zf.namelist() if n.endswith(".json")]
+            return json.loads(zf.read(names[0]))
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            "BLASTp timed out — NCBI nr database queries can take 10+ minutes under load. "
+            "Try again; the job may still be running on NCBI's servers."
+        )
 
 
 def run_phobius(sequence):
     url = "https://www.ebi.ac.uk/Tools/services/rest/phobius"
-    r = requests.post(f"{url}/run", data={
-        "email": EMAIL, "sequence": sequence,
-        "format": "short", "stype": "protein",
-    }, timeout=30)
-    r.raise_for_status()
-    jid = r.text.strip()
-    if _ebi_poll(url, jid) != "FINISHED":
-        raise RuntimeError("Job did not finish successfully")
-    r = requests.get(f"{url}/result/{jid}/out", timeout=30)
-    r.raise_for_status()
-    return r.text
+    try:
+        r = requests.post(f"{url}/run", data={
+            "email": EMAIL, "sequence": sequence,
+            "format": "short", "stype": "protein",
+        }, timeout=60)
+        r.raise_for_status()
+        jid = r.text.strip()
+        if _ebi_poll(url, jid) != "FINISHED":
+            raise RuntimeError("Job did not finish successfully")
+        r = requests.get(f"{url}/result/{jid}/out", timeout=90)
+        r.raise_for_status()
+        return r.text
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            "Phobius timed out — EBI servers may be slow. Try again in a few minutes."
+        )
 
 
 def run_hmmer(sequence):
     url = "https://www.ebi.ac.uk/Tools/services/rest/hmmer3_hmmscan"
-    r = requests.post(f"{url}/run", data={
-        "email": EMAIL, "sequence": sequence,
-        "database": "pfam", "E": "1.0",
-    }, timeout=30)
-    r.raise_for_status()
-    jid = r.text.strip()
-    if _ebi_poll(url, jid) != "FINISHED":
-        raise RuntimeError("Job did not finish successfully")
-    r = requests.get(f"{url}/result/{jid}/out", timeout=30)
-    r.raise_for_status()
-    return r.text
+    try:
+        r = requests.post(f"{url}/run", data={
+            "email": EMAIL, "sequence": sequence,
+            "database": "pfam", "E": "1.0",
+        }, timeout=60)
+        r.raise_for_status()
+        jid = r.text.strip()
+        if _ebi_poll(url, jid) != "FINISHED":
+            raise RuntimeError("Job did not finish successfully")
+        r = requests.get(f"{url}/result/{jid}/out", timeout=120)
+        r.raise_for_status()
+        return r.text
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            "HMMER timed out — EBI servers may be slow. Try again in a few minutes."
+        )
 
 
 def run_foldseek(pdb_text):
@@ -466,7 +487,7 @@ def run_foldseek(pdb_text):
         raise RuntimeError(f"FoldSeek server: {resp['status']}")
     ticket = resp["id"]
     while True:
-        s = requests.get(f"{url}/ticket/{ticket}", timeout=30).json().get("status", "UNKNOWN")
+        s = requests.get(f"{url}/ticket/{ticket}", timeout=60).json().get("status", "UNKNOWN")
         if s in ("COMPLETE", "ERROR", "FAILED", "UNKNOWN"):
             break
         time.sleep(10)
