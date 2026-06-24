@@ -466,78 +466,78 @@ def main():
         )
         return
 
-    # ── Upload form ───────────────────────────────────────────────────────────
-    with st.form("run_form"):
-        col_fasta, col_pdb = st.columns(2)
-        with col_fasta:
-            fasta_upload = st.file_uploader(
-                "FASTA file — InterProScan · BLASTp · Phobius · HMMER",
-                type=["fasta", "fa", "txt"],
+    # Silently drop any job ID left over from a previous server session.
+    # Do this before rendering anything so the form and job views never clash.
+    stored_id = st.session_state.get("job_id")
+    if stored_id and stored_id not in _JOBS:
+        st.session_state.pop("job_id", None)
+        st.session_state.pop("job_name", None)
+        stored_id = None
+
+    # ── Upload form (shown only when no job is active) ────────────────────────
+    if not stored_id:
+        with st.form("run_form"):
+            col_fasta, col_pdb = st.columns(2)
+            with col_fasta:
+                fasta_upload = st.file_uploader(
+                    "FASTA file — InterProScan · BLASTp · Phobius · HMMER",
+                    type=["fasta", "fa", "txt"],
+                )
+            with col_pdb:
+                pdb_upload = st.file_uploader(
+                    "PDB file (optional) — FoldSeek structural search",
+                    type=["pdb"],
+                )
+            protein_name = st.text_input(
+                "Protein name",
+                placeholder="e.g. SLINKY  (defaults to filename stem if left blank)",
             )
-        with col_pdb:
-            pdb_upload = st.file_uploader(
-                "PDB file (optional) — FoldSeek structural search",
-                type=["pdb"],
+            submitted = st.form_submit_button(
+                "Run Pipeline", type="primary", use_container_width=True
             )
-        protein_name = st.text_input(
-            "Protein name",
-            placeholder="e.g. SLINKY  (defaults to filename stem if left blank)",
-        )
-        submitted = st.form_submit_button(
-            "Run Pipeline", type="primary", use_container_width=True
-        )
 
-    if submitted:
-        if not fasta_upload and not pdb_upload:
-            st.error("Please upload at least one file.")
-            return
+        if submitted:
+            if not fasta_upload and not pdb_upload:
+                st.error("Please upload at least one file.")
+                return
 
-        fasta_text = fasta_upload.read().decode("utf-8") if fasta_upload else None
-        pdb_text = pdb_upload.read().decode("utf-8") if pdb_upload else None
-        name = protein_name.strip() or (
-            Path(fasta_upload.name).stem if fasta_upload else Path(pdb_upload.name).stem
-        )
+            fasta_text = fasta_upload.read().decode("utf-8") if fasta_upload else None
+            pdb_text = pdb_upload.read().decode("utf-8") if pdb_upload else None
+            name = protein_name.strip() or (
+                Path(fasta_upload.name).stem if fasta_upload else Path(pdb_upload.name).stem
+            )
 
-        job_id = str(uuid.uuid4())
-        with _JOBS_LOCK:
-            _JOBS[job_id] = {"done": False, "tools": {}, "name": name}
+            job_id = str(uuid.uuid4())
+            with _JOBS_LOCK:
+                _JOBS[job_id] = {"done": False, "tools": {}, "name": name}
 
-        threading.Thread(
-            target=_job_runner, args=(job_id, fasta_text, pdb_text), daemon=True
-        ).start()
+            threading.Thread(
+                target=_job_runner, args=(job_id, fasta_text, pdb_text), daemon=True
+            ).start()
 
-        st.session_state["job_id"] = job_id
-        st.session_state["job_name"] = name
-        st.rerun()
+            st.session_state["job_id"] = job_id
+            st.session_state["job_name"] = name
+            st.rerun()
+
+        return  # nothing more to show until a job is running
 
     # ── Job status and results ────────────────────────────────────────────────
-    if "job_id" not in st.session_state:
-        return
-
-    job_id = st.session_state["job_id"]
-    job = _JOBS.get(job_id)
-
-    if not job:
-        st.warning("Job not found — the server may have restarted. Please run again.")
-        if st.button("Clear"):
-            del st.session_state["job_id"]
-            st.rerun()
-        return
+    job_id = stored_id
+    job = _JOBS[job_id]  # guaranteed to exist by the stale-check above
 
     with _JOBS_LOCK:
         done = job["done"]
         name = job.get("name", "")
         tools = {k: dict(v) for k, v in job["tools"].items()}
 
-    # Header row
+    # Header
     hdr_col, btn_col = st.columns([6, 1])
     with hdr_col:
-        status_word = "Completed" if done else "Running"
-        st.subheader(f"{status_word}: {name}")
+        st.subheader(f"{'Completed' if done else 'Running'}: {name}")
     with btn_col:
         if st.button("New search", use_container_width=True):
-            del st.session_state["job_id"]
-            del st.session_state["job_name"]
+            st.session_state.pop("job_id", None)
+            st.session_state.pop("job_name", None)
             st.rerun()
 
     # Per-tool status cards
@@ -549,12 +549,12 @@ def main():
                 value=_STATUS_LABELS.get(state["status"], state["status"]),
             )
 
-    # Error messages
+    # Inline error messages for failed tools
     for tool_name, state in tools.items():
         if state["status"] == "FAILED":
             st.error(f"**{tool_name}** failed: {state.get('error', 'Unknown error')}")
 
-    # Results tabs — one per finished tool
+    # Results tabs — one per finished tool, appearing as they complete
     finished = {n: s for n, s in tools.items() if s["status"] == "FINISHED"}
     if finished:
         st.divider()
