@@ -14,6 +14,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import pandas as pd
 import requests
 import streamlit as st
 from dotenv import load_dotenv
@@ -156,6 +157,170 @@ def run_foldseek(pdb_text):
     return r.content  # raw tar.gz bytes
 
 
+# ── Result display ────────────────────────────────────────────────────────────
+
+def show_interproscan(data: dict) -> None:
+    rows = []
+    for res in data.get("results", []):
+        for match in res.get("matches", []):
+            sig   = match.get("signature", {})
+            entry = sig.get("entry") or {}
+            lib   = sig.get("signatureLibraryRelease", {}).get("library", "")
+            desc  = entry.get("description") or sig.get("description") or ""
+            for loc in match.get("locations", []):
+                rows.append({
+                    "Database":    lib,
+                    "Accession":   sig.get("accession", ""),
+                    "Name":        sig.get("name", ""),
+                    "Description": desc,
+                    "Start":       loc.get("start", ""),
+                    "End":         loc.get("end", ""),
+                    "E-value":     match.get("evalue", ""),
+                })
+    if not rows:
+        st.info("No domain matches found.")
+        return
+    df = pd.DataFrame(rows)
+    c1, c2 = st.columns(2)
+    c1.metric("Matches", len(df))
+    c2.metric("Databases hit", df["Database"].nunique())
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def show_blast(data: dict) -> None:
+    try:
+        bo2  = data["BlastOutput2"]
+        bo2  = bo2[0] if isinstance(bo2, list) else bo2
+        hits = bo2["report"]["results"]["search"]["hits"]
+    except (KeyError, IndexError, TypeError):
+        st.info("No BLAST hits found.")
+        return
+    if not hits:
+        st.info("No BLAST hits found.")
+        return
+    rows = []
+    for hit in hits:
+        desc      = (hit.get("description") or [{}])[0]
+        hsp       = (hit.get("hsps")        or [{}])[0]
+        align_len = hsp.get("align_len") or 1
+        rows.append({
+            "Accession":   desc.get("accession", ""),
+            "Description": (desc.get("title") or "")[:80],
+            "Organism":    desc.get("sciname", ""),
+            "% Identity":  round((hsp.get("identity") or 0) / align_len * 100, 1),
+            "E-value":     hsp.get("evalue", ""),
+            "Bit score":   hsp.get("bit_score", ""),
+        })
+    df = pd.DataFrame(rows)
+    st.metric("Hits returned", len(df))
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def show_phobius(text: str) -> None:
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("SEQENCE"):
+            continue
+        parts = line.split()
+        if len(parts) >= 4:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("TM helices",    parts[1])
+            c2.metric("Signal peptide", "Yes" if parts[2] == "1" else "No")
+            c3.metric("Topology",       parts[3])
+            st.caption("Topology codes: o = outside, i = inside, h = TM helix")
+            return
+    st.info("No Phobius results parsed.")
+
+
+def show_hmmer(text: str) -> None:
+    rows, in_hits, below = [], False, False
+    for line in text.splitlines():
+        if "Scores for complete sequence" in line:
+            in_hits = True;  continue
+        if not in_hits:
+            continue
+        if "Domain annotation" in line:
+            break
+        s = line.strip()
+        if not s or s.startswith("E-value"):
+            continue
+        # Must check inclusion threshold before the "---" guard — the line
+        # "------ inclusion threshold ------" starts with "---" and would
+        # otherwise be skipped, leaving `below` permanently False.
+        if "inclusion threshold" in s:
+            below = True;  continue
+        if s.startswith("---"):
+            continue
+        parts = s.split(None, 9)
+        if len(parts) < 9:
+            continue
+        try:
+            float(parts[0])
+        except ValueError:
+            continue
+        rows.append({
+            "Model (Pfam)": parts[8],
+            "Description":  parts[9] if len(parts) > 9 else "",
+            "E-value":      parts[0],
+            "Score":        float(parts[1]),
+            "N domains":    int(parts[7]),
+            "Significant":  "Yes" if not below else "No",
+        })
+    if not rows:
+        st.info("No Pfam domain matches found.")
+        return
+    df = pd.DataFrame(rows)
+    above = int((df["Significant"] == "Yes").sum())
+    c1, c2 = st.columns(2)
+    c1.metric("Significant domains", above)
+    c2.metric("Total (incl. below threshold)", len(df))
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def show_foldseek(tar_bytes: bytes) -> None:
+    cols = ["query","target","fident","alnlen","mismatch",
+            "gapopen","qstart","qend","tstart","tend","prob","evalue","bits"]
+    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
+        m8s = [m for m in tar.getmembers()
+               if m.name.endswith(".m8") and "_report" not in m.name]
+        if not m8s:
+            st.info("No result files in archive.")
+            return
+        db_names = [m.name.split("alis_")[-1].replace(".m8", "") for m in m8s]
+        total = 0
+        frames = {}
+        for member, db in zip(m8s, db_names):
+            f = tar.extractfile(member)
+            if not f:
+                continue
+            lines = [l for l in f.read().decode("utf-8", errors="replace").splitlines() if l.strip()]
+            total += len(lines)
+            if not lines:
+                frames[db] = pd.DataFrame()
+                continue
+            rows = []
+            for line in lines:
+                p = line.split("\t")
+                rows.append({c: (p[i] if i < len(p) else "") for i, c in enumerate(cols)})
+            df = pd.DataFrame(rows)
+            for c in ("fident", "prob", "evalue", "bits"):
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+            df["target"] = df["target"].str[:60]
+            df = df[["target","fident","prob","evalue","bits","qstart","qend"]].copy()
+            df.columns = ["Target","Identity %","Probability","E-value","Bits","Q.Start","Q.End"]
+            frames[db] = df
+
+        st.metric("Total hits across all databases", total)
+        db_tabs = st.tabs(db_names)
+        for tab, db in zip(db_tabs, db_names):
+            with tab:
+                df = frames.get(db, pd.DataFrame())
+                st.caption(f"{len(df)} hits")
+                if not df.empty:
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No hits.")
+
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 
 fasta_file = st.file_uploader(
@@ -213,27 +378,8 @@ if run:
                 continue
 
             data = r["data"]
-
-            if name in ("InterProScan", "BLASTp"):
-                st.json(data)
-
-            elif name == "FoldSeek":
-                tar_bytes = data
-                with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
-                    m8s = [m for m in tar.getmembers() if m.name.endswith(".m8")]
-                    if not m8s:
-                        st.info("No result files found.")
-                    else:
-                        db_tabs = st.tabs([
-                            m.name.split("alis_")[-1].replace(".m8", "") for m in m8s
-                        ])
-                        for tab, member in zip(db_tabs, m8s):
-                            with tab:
-                                f = tar.extractfile(member)
-                                content = f.read().decode("utf-8", errors="replace") if f else ""
-                                hit_count = len([l for l in content.splitlines() if l.strip()])
-                                st.caption(f"{hit_count} hits")
-                                st.text(content)
-
-            else:  # Phobius, HMMER — plain text
-                st.text(data)
+            if   name == "InterProScan": show_interproscan(data)
+            elif name == "BLASTp":       show_blast(data)
+            elif name == "Phobius":      show_phobius(data)
+            elif name == "HMMER":        show_hmmer(data)
+            elif name == "FoldSeek":     show_foldseek(data)
