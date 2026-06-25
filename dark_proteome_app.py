@@ -394,50 +394,101 @@ def run_interproscan(sequence):
 
 def run_blast(sequence):
     url = "https://blast.ncbi.nlm.nih.gov/blast/Blast.cgi"
-    try:
-        r = requests.put(url, params={
-            "CMD": "Put", "PROGRAM": "blastp", "DATABASE": "nr",
-            "QUERY": sequence, "FORMAT_TYPE": "JSON2",
-            "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-        }, timeout=60)
-        r.raise_for_status()
-        rid, rtoe = None, 30
-        for line in r.text.splitlines():
-            if line.startswith("    RID = "):
-                rid = line.split("=", 1)[1].strip()
-            elif line.startswith("    RTOE = "):
-                rtoe = int(line.split("=", 1)[1].strip())
-        if not rid:
-            raise RuntimeError("No RID in NCBI response")
-        time.sleep(rtoe)
-        while True:
+
+    # SUBMISSION — POST (not PUT), retry up to 3 times
+    rid = None
+    for attempt in range(3):
+        try:
+            r = requests.post(url, data={
+                "CMD": "Put", "PROGRAM": "blastp", "DATABASE": "nr",
+                "ENTREZ_QUERY": "bacteria[organism]",
+                "QUERY": sequence, "FORMAT_TYPE": "JSON2",
+                "HITLIST_SIZE": 10, "MATRIX_NAME": "BLOSUM62", "EXPECT": "0.001",
+                "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
+            }, timeout=60)
+            r.raise_for_status()
+            rtoe = 15
+            for line in r.text.splitlines():
+                if line.startswith("    RID = "):
+                    rid = line.split("=", 1)[1].strip()
+                elif line.startswith("    RTOE = "):
+                    rtoe = max(15, int(line.split("=", 1)[1].strip()))
+            if rid:
+                break
+        except Exception as exc:
+            if attempt < 2:
+                time.sleep(10)
+            else:
+                raise RuntimeError(f"BLASTp submission failed after 3 attempts: {exc}")
+    if not rid:
+        raise RuntimeError("BLASTp: no RID in NCBI response after 3 attempts")
+
+    print(f"[BLAST] Submitted RID={rid}, waiting {rtoe}s before first poll")
+    time.sleep(rtoe)
+
+    # POLLING — 720s total budget, 30s per individual request, 30s between polls
+    # UNKNOWN = still queued (keep polling); only READY/FAILED are terminal
+    start = time.time()
+    deadline = start + 720
+    status = "WAITING"
+    poll_n = 0
+    while time.time() < deadline:
+        poll_n += 1
+        elapsed = int(time.time() - start)
+        try:
             r = requests.get(url, params={
                 "CMD": "Get", "RID": rid, "FORMAT_OBJECT": "SearchInfo",
                 "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-            }, timeout=60)
+            }, timeout=30)
+            r.raise_for_status()
             status = "UNKNOWN"
+            hits_line = ""
             for line in r.text.splitlines():
                 if "Status=" in line:
                     status = line.strip().split("=", 1)[1].strip()
-                    break
-            if status in ("READY", "FAILED", "UNKNOWN"):
+                if "ThereAreHits=" in line:
+                    hits_line = line.strip()
+            print(f"[BLAST] Poll #{poll_n} at {elapsed}s elapsed: status={status}")
+            if status == "READY":
+                if "ThereAreHits=no" in hits_line:
+                    print("[BLAST] 0 hits — no bacterial homologues or very distant homology")
+                    return {"BlastOutput2": []}
                 break
-            time.sleep(10)
-        if status != "READY":
-            raise RuntimeError(f"BLAST status: {status}")
-        r = requests.get(url, params={
-            "CMD": "Get", "RID": rid, "FORMAT_TYPE": "JSON2",
-            "DESCRIPTIONS": 10, "ALIGNMENTS": 10,
-            "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-        }, timeout=300)
-        with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
-            names = [n for n in zf.namelist() if n.endswith(".json")]
-            return json.loads(zf.read(names[0]))
-    except requests.exceptions.Timeout:
+            if status == "FAILED":
+                raise RuntimeError("BLASTp: job failed on NCBI servers")
+            # UNKNOWN / WAITING = still queued, continue polling
+        except requests.exceptions.Timeout:
+            print(f"[BLAST] Poll #{poll_n} request timed out (30s), retrying")
+        remaining = deadline - time.time()
+        if remaining > 0:
+            time.sleep(min(30, remaining))
+
+    if status != "READY":
         raise RuntimeError(
-            "BLASTp timed out — NCBI nr database queries can take 10+ minutes under load. "
-            "Try again; the job may still be running on NCBI's servers."
+            "BLASTp did not complete within 12 minutes — NCBI queue may be busy. "
+            "Try again later."
         )
+
+    # RESULT DOWNLOAD — retry once on timeout
+    for attempt in range(2):
+        try:
+            r = requests.get(url, params={
+                "CMD": "Get", "RID": rid, "FORMAT_TYPE": "JSON2",
+                "DESCRIPTIONS": 10, "ALIGNMENTS": 10,
+                "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
+            }, timeout=60)
+            r.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+                names = [n for n in zf.namelist() if n.endswith(".json")]
+                return json.loads(zf.read(names[0]))
+        except requests.exceptions.Timeout:
+            if attempt == 0:
+                print("[BLAST] Result download timed out, retrying once")
+                time.sleep(5)
+            else:
+                raise RuntimeError("BLASTp result download timed out after retry")
+        except Exception as exc:
+            raise RuntimeError(f"BLASTp result download failed: {exc}")
 
 
 def run_phobius(sequence):
@@ -462,22 +513,66 @@ def run_phobius(sequence):
 
 def run_hmmer(sequence):
     url = "https://www.ebi.ac.uk/Tools/services/rest/hmmer3_hmmscan"
+
+    # SUBMISSION — retry up to 3 times
+    jid = None
+    for attempt in range(3):
+        try:
+            r = requests.post(f"{url}/run", data={
+                "email": EMAIL, "sequence": sequence,
+                "database": "pfam", "E": "1.0",
+            }, timeout=60)
+            r.raise_for_status()
+            jid = r.text.strip()
+            if jid:
+                break
+        except Exception as exc:
+            if attempt < 2:
+                time.sleep(10)
+            else:
+                raise RuntimeError(f"HMMER submission failed after 3 attempts: {exc}")
+    if not jid:
+        raise RuntimeError("HMMER: no job ID in EBI response")
+
+    print(f"[HMMER] Submitted job ID={jid}, waiting 5s before first poll")
+    time.sleep(5)
+
+    # POLLING — 360s total budget, 20s per individual request, 15s between polls
+    start = time.time()
+    deadline = start + 360
+    status = "PENDING"
+    poll_n = 0
+    while time.time() < deadline:
+        poll_n += 1
+        elapsed = int(time.time() - start)
+        try:
+            r = requests.get(f"{url}/status/{jid}", timeout=20)
+            r.raise_for_status()
+            status = r.text.strip()
+            print(f"[HMMER] Poll #{poll_n} at {elapsed}s elapsed: status={status}")
+            if status == "FINISHED":
+                break
+            if status in ("FAILURE", "ERROR", "NOT_FOUND", "CANCELLED"):
+                raise RuntimeError(f"HMMER job ended with status: {status}")
+        except requests.exceptions.Timeout:
+            print(f"[HMMER] Poll #{poll_n} request timed out (20s), retrying")
+        remaining = deadline - time.time()
+        if remaining > 0:
+            time.sleep(min(15, remaining))
+
+    if status != "FINISHED":
+        raise RuntimeError(
+            "HMMER did not complete within 6 minutes — EBI servers may be under load. "
+            "Try again in a few minutes."
+        )
+
+    # RESULT DOWNLOAD
     try:
-        r = requests.post(f"{url}/run", data={
-            "email": EMAIL, "sequence": sequence,
-            "database": "pfam", "E": "1.0",
-        }, timeout=60)
-        r.raise_for_status()
-        jid = r.text.strip()
-        if _ebi_poll(url, jid) != "FINISHED":
-            raise RuntimeError("Job did not finish successfully")
-        r = requests.get(f"{url}/result/{jid}/out", timeout=120)
+        r = requests.get(f"{url}/result/{jid}/out", timeout=60)
         r.raise_for_status()
         return r.text
     except requests.exceptions.Timeout:
-        raise RuntimeError(
-            "HMMER timed out — EBI servers may be slow. Try again in a few minutes."
-        )
+        raise RuntimeError("HMMER result download timed out — try again in a few minutes.")
 
 
 def run_foldseek(pdb_text):
