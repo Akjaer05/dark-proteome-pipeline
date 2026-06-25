@@ -835,25 +835,54 @@ def _parse_pdb_plddts(pdb_text: str) -> list:
 
 
 def _run_dssp_raw(pdb_text: str):
-    """Return per-residue SS code list, or None on total failure.
+    """Return per-residue SS code list ('H', 'E', or 'C'), or None on total failure.
 
     Strategy (in order):
-      1. pydssp — pure-Python DSSP, no binary, works everywhere if installed.
-         Returns 3-state codes ('H', 'E', 'C').
-      2. mkdssp / dssp binary via BioPython DSSP wrapper.
-         Returns 8-state DSSP codes; downstream code handles both.
+      1. pydssp  — pure-Python DSSP if the package is installed.
+      2. Phi/psi dihedral heuristic via BioPython — always available
+         (BioPython is a hard dependency); less accurate than DSSP but
+         never fails on valid PDB input.
+      3. mkdssp / dssp binary via BioPython DSSP wrapper.
     """
-    # ── 1. pydssp (pure Python) ───────────────────────────────────────────
+    # ── 1. pydssp (pure Python, optional) ─────────────────────────────────
     try:
         import pydssp
         raw    = pydssp.read_pdbtext(pdb_text)
-        coords = raw[0] if isinstance(raw, tuple) else raw
+        coords = raw[0] if isinstance(raw, (list, tuple)) else raw
         ss_arr = pydssp.assign(coords, out_type="c3")
         return [str(s) for s in ss_arr]
     except Exception:
-        pass  # fall through to binary
+        pass
 
-    # ── 2. mkdssp / dssp binary via BioPython ────────────────────────────
+    # ── 2. Phi/psi dihedral heuristic (always available via BioPython) ────
+    try:
+        from Bio.PDB.Polypeptide import PPBuilder
+        parser    = PDBParser(QUIET=True)
+        structure = parser.get_structure("p", io.StringIO(pdb_text))
+        ppb       = PPBuilder()
+        ss_list: list[str] = []
+        for pp in ppb.build_peptides(structure):
+            for phi, psi in pp.get_phi_psi_list():
+                if phi is None or psi is None:
+                    ss_list.append("C")
+                    continue
+                phi_d = math.degrees(phi)
+                psi_d = math.degrees(psi)
+                # α-helix region of Ramachandran plot
+                if -90 <= phi_d <= -30 and -77 <= psi_d <= -17:
+                    ss_list.append("H")
+                # β-strand region (both parallel and antiparallel)
+                elif (-170 <= phi_d <= -50 and
+                      (100 <= psi_d <= 180 or -180 <= psi_d <= -150)):
+                    ss_list.append("E")
+                else:
+                    ss_list.append("C")
+        if ss_list:
+            return ss_list
+    except Exception:
+        pass
+
+    # ── 3. mkdssp / dssp binary via BioPython ─────────────────────────────
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("p", io.StringIO(pdb_text))
     model = structure[0]
@@ -1424,8 +1453,8 @@ def _beta_solenoid_html(analysis: dict, seq_len: int) -> str:
         rtx_hits = analysis.get("rtx_hits", [])
 
         if not dssp_ok:
-            msg = ("DSSP binary (mkdssp/dssp) not found — install it to enable "
-                   "strand-based solenoid analysis. Sequence-only results shown below.")
+            msg = ("Secondary structure assignment failed — could not assign "
+                   "strands from this PDB file. Sequence-only results shown below.")
         elif n < 2:
             msg = (f"Only {n} beta strand(s) detected by DSSP — "
                    f"insufficient for solenoid scoring (need ≥2).")
