@@ -1113,36 +1113,136 @@ def _parse_pdb_ca_coords(pdb_text: str) -> list:
     return coords
 
 
+# Accessions that mark the C-terminal β-barrel translocator in autotransporters
+_BARREL_ACCESSIONS = {"PS51208", "SSF103515", "PF00291"}
+
+# Accessions that positively identify autotransporter passenger (β-helix) domain
+_AT_ACCESSIONS = {"PF20696", "PF27415", "PF22399", "PS51208", "PF00291"}
+
+# BLAST description keywords indicating autotransporter architecture
+_AT_BLAST_KEYWORDS = [
+    "biga", "autotransporter", "fha", "filamentous haemagglutinin",
+    "aida", "trimeric autotransporter", "type v secretion",
+    "pertactin", "intimin", "adhesin involved in",
+]
+
+
+def _find_barrel_cutoff(ipr_data) -> tuple:
+    """Return (cutoff_residue, hit_label) where cutoff_residue is the start of
+    the C-terminal β-barrel domain, or (0, None) if not found."""
+    if not ipr_data:
+        return 0, None
+    cutoff, hit_label = None, None
+    for res in ipr_data.get("results", []):
+        for match in res.get("matches", []):
+            sig = match.get("signature", {})
+            acc = sig.get("accession", "")
+            if acc in _BARREL_ACCESSIONS:
+                name = sig.get("name", "") or sig.get("description", "")
+                lib  = sig.get("signatureLibraryRelease", {}).get("library", "")
+                for loc in match.get("locations", []):
+                    s = int(loc.get("start", 0))
+                    if s > 0 and (cutoff is None or s < cutoff):
+                        cutoff = s
+                        hit_label = f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})"
+    return (cutoff or 0), hit_label
+
+
+def _score_autotransporter(ipr_data, blast_data, seq: str,
+                            passenger_gap_sd: float) -> tuple:
+    """Return (score, [evidence strings]) for the Autotransporter β-helix fold."""
+    score, hits = 0, []
+
+    # InterProScan: each matching accession adds 25 pts (max 100)
+    if ipr_data:
+        seen: set = set()
+        for res in ipr_data.get("results", []):
+            for match in res.get("matches", []):
+                sig = match.get("signature", {})
+                acc = sig.get("accession", "")
+                if acc in _AT_ACCESSIONS and acc not in seen:
+                    score = min(100, score + 25)
+                    seen.add(acc)
+                    name = sig.get("name", "") or sig.get("description", "")
+                    lib  = sig.get("signatureLibraryRelease", {}).get("library", "")
+                    hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+
+    # BLAST top hit: first matching keyword adds 15 pts
+    if blast_data:
+        top_title = ""
+        for result in blast_data.get("BlastOutput2", []):
+            search = result.get("report", {}).get("results", {}).get("search", {})
+            blast_hits = search.get("hits", [])
+            if blast_hits:
+                top_title = (blast_hits[0].get("description", [{}])[0]
+                             .get("title", "").lower())
+                break
+        for kw in _AT_BLAST_KEYWORDS:
+            if kw in top_title:
+                score = min(100, score + 15)
+                hits.append(f"BLAST top hit contains '{kw}'")
+                break
+
+    # C-terminal Phe — BAM complex recognition signal for β-barrel secretion
+    if seq and seq.rstrip()[-1].upper() == "F":
+        score = min(100, score + 10)
+        hits.append("C-terminal Phe (BAM complex recognition signal)")
+
+    # Regular passenger domain strand spacing adds 15 pts
+    if 0 < passenger_gap_sd < 8:
+        score = min(100, score + 15)
+        hits.append(f"Passenger strand spacing SD {passenger_gap_sd:.1f} < 8 (regular β-helix rungs)")
+
+    return score, hits
+
+
 def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str,
-                            dssp_available: bool = True) -> dict:
+                            dssp_available: bool = True,
+                            ipr_data=None, blast_data=None) -> dict:
     rtx_hits = _rtx_matches(seq) if seq else []
-    n = len(strands)
-    if n < 2:
-        return {"available": False, "n_strands": n,
+    n_total  = len(strands)
+    if n_total < 2:
+        return {"available": False, "n_strands": n_total,
                 "dssp_available": dssp_available, "rtx_hits": rtx_hits}
 
-    lengths  = [e - s + 1 for s, e in strands]
+    # ── Problem 1: exclude C-terminal β-barrel translocator ──────────────────
+    barrel_cutoff, barrel_hit = _find_barrel_cutoff(ipr_data)
+    if barrel_cutoff > 0:
+        work_strands  = [(s, e) for s, e in strands if s < barrel_cutoff]
+        work_ca       = ca_coords[:barrel_cutoff - 1] if ca_coords else []
+        work_plddt    = plddt[:barrel_cutoff - 1]     if plddt     else plddt
+    else:
+        work_strands  = strands
+        work_ca       = ca_coords
+        work_plddt    = plddt
+
+    # Fall back to all strands if exclusion leaves fewer than 2
+    if len(work_strands) < 2:
+        work_strands, work_ca, work_plddt = strands, ca_coords, plddt
+        barrel_cutoff, barrel_hit = 0, None
+
+    n = len(work_strands)
+    lengths  = [e - s + 1 for s, e in work_strands]
     mean_len = sum(lengths) / n
-    gaps     = [strands[i+1][0] - strands[i][1] - 1 for i in range(n - 1)]
+    gaps     = [work_strands[i+1][0] - work_strands[i][1] - 1 for i in range(n - 1)]
     mean_gap = sum(gaps) / len(gaps) if gaps else 0
     gap_sd   = (math.sqrt(sum((g - mean_gap)**2 for g in gaps) / len(gaps))
                 if len(gaps) > 1 else 0)
 
-    # Strand direction unit vectors from Cα positions
+    # Strand direction vectors (passenger domain only)
     def _norm(v):
         m = math.sqrt(sum(x*x for x in v))
         return tuple(x/m for x in v) if m > 0 else (0.0, 0.0, 0.0)
 
     strand_dirs = []
-    for s, e in strands:
+    for s, e in work_strands:
         s0, e0 = s - 1, e - 1
-        if 0 <= s0 < len(ca_coords) and 0 <= e0 < len(ca_coords):
-            v = tuple(ca_coords[e0][j] - ca_coords[s0][j] for j in range(3))
+        if 0 <= s0 < len(work_ca) and 0 <= e0 < len(work_ca):
+            v = tuple(work_ca[e0][j] - work_ca[s0][j] for j in range(3))
             strand_dirs.append(_norm(v))
         else:
             strand_dirs.append(None)
 
-    # Crossing angles (degrees) between consecutive strands
     angles = []
     for i in range(len(strand_dirs) - 1):
         v1, v2 = strand_dirs[i], strand_dirs[i+1]
@@ -1156,24 +1256,28 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
     parallel_pct     = round(sum(1 for a in angles if a < 45)  / len(angles) * 100) if angles else 0
     antiparallel_pct = round(sum(1 for a in angles if a > 135) / len(angles) * 100) if angles else 0
 
-    # RTX motif → check proximity to any strand (±3 residues of edge)
-    rtx_hits = _rtx_matches(seq) if seq else []
+    # RTX proximity check (passenger strands only)
     rtx_on_strands = any(
         not (re < s - 3 or rs > e + 3)
         for rs, re in rtx_hits
-        for s, e in strands
+        for s, e in work_strands
     )
 
-    # Mean pLDDT over strand residues
-    strand_pl = [plddt[i] for s, e in strands for i in range(s - 1, min(e, len(plddt)))]
+    # pLDDT over passenger strand residues
+    strand_pl = [work_plddt[i]
+                 for s, e in work_strands
+                 for i in range(s - 1, min(e, len(work_plddt)))]
     strand_plddt_mean = round(sum(strand_pl) / len(strand_pl), 1) if strand_pl else 0
 
-    # ── Fold scores (0–100) ──────────────────────────────────────────────────
-    # Beta-solenoid
+    # ── Problem 2: Autotransporter β-helix score ──────────────────────────────
+    at_score, at_hits = _score_autotransporter(ipr_data, blast_data, seq, gap_sd)
+
+    # ── Fold scores (0–100) ───────────────────────────────────────────────────
+    # Beta-solenoid (RTX-type)
     sol  = min(30, n * 4)
     sol += max(0, int(30 - gap_sd * 6))
     sol += round(max(parallel_pct, antiparallel_pct) * 0.2) if angles else 0
-    sol += 15 if rtx_on_strands else 0
+    sol += 15 if rtx_on_strands else 0   # RTX only boosts solenoid, never penalises AT
     sol += 5  if strand_plddt_mean > 70 else 0
     sol  = min(100, max(0, sol))
 
@@ -1185,58 +1289,103 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
     sand += 5  if strand_plddt_mean > 70 else 0
     sand  = min(100, max(0, sand))
 
-    # Beta-barrel
-    barrel  = 30 if 8 <= n <= 24 else 0
+    # Beta-barrel (uses full strand count, not just passenger)
+    n_all   = n_total
+    barrel  = 30 if 8 <= n_all <= 24 else 0
     barrel += int(antiparallel_pct * 0.25)
     barrel += 20 if 1 <= mean_gap <= 5 else 0
     barrel += max(0, int(20 - gap_sd * 3))
     barrel += 15 if 5 <= mean_len <= 12 else 0
     barrel  = min(100, max(0, barrel))
 
-    fold_scores = {"Beta-solenoid": sol, "Beta-sandwich": sand, "Beta-barrel": barrel}
-    best_fold   = max(fold_scores, key=fold_scores.get)
+    fold_scores = {
+        "Beta-solenoid":           sol,
+        "Autotransporter β-helix": at_score,
+        "Beta-sandwich":           sand,
+        "Beta-barrel":             barrel,
+    }
+    best_fold = max(fold_scores, key=fold_scores.get)
 
-    # ── 4 classification criteria ─────────────────────────────────────────────
-    criteria = {
+    # ── Problem 3: context-sensitive criteria ─────────────────────────────────
+    # RTX criterion only shown when the protein is a plausible RTX solenoid.
+    # For autotransporters its absence is neutral — replaced by AT evidence card.
+    is_at_context = (best_fold == "Autotransporter β-helix") or (at_score > sol)
+    criteria: dict = {
         "Regular strand spacing":    gap_sd < 4.0,
         "Parallel orientation":      parallel_pct > 60,
-        "RTX sequence motif":        rtx_on_strands,
         "High pLDDT in repeat core": strand_plddt_mean > 70,
     }
+    if is_at_context:
+        criteria["Autotransporter domain hits"] = at_score >= 25
+    else:
+        criteria["RTX sequence motif"] = rtx_on_strands
 
     # ── Reasoning chain ───────────────────────────────────────────────────────
-    spacing_q = "regular (solenoid-consistent)" if gap_sd < 4 else "irregular"
+    spacing_q = ("regular" if gap_sd < 4 else
+                 "moderately regular" if gap_sd < 8 else "irregular")
     orient_q  = (f"{parallel_pct}% parallel — solenoid-consistent" if parallel_pct > 60
                  else f"{antiparallel_pct}% antiparallel — barrel/sandwich-like" if antiparallel_pct > 60
-                 else "mixed orientation, inconclusive")
-    reasoning = [
-        (f"DSSP assigned {n} beta strand{'s' if n != 1 else ''}, "
-         f"average {round(mean_len, 1)} aa (range {min(lengths)}–{max(lengths)} aa). "
-         f"Solenoids typically have many short strands (≥6, 3–8 aa)."),
-        (f"Inter-strand spacing: mean {round(mean_gap, 1)} residues, "
-         f"SD {round(gap_sd, 1)} — {spacing_q}. "
-         f"Beta-solenoids show very low SD (<4) due to regular turn geometry."),
-        (f"Consecutive strand crossing angle: mean {round(mean_angle, 0):.0f}°, "
-         f"SD {round(angle_sd, 0):.0f}° — {orient_q}. "
-         f"Solenoids show uniform parallel (~0°) or antiparallel (~180°) strand packing."),
-        ("RTX nonapeptide (GGXGXDXUX) detected at strand edges — "
-         "a defining motif of RTX-family beta-solenoid toxins."
-         if rtx_on_strands
-         else "No RTX motif (GGXGXDXUX) found near strand edges. "
-              "Absence reduces RTX solenoid probability but does not exclude other solenoid classes."),
-        (f"Mean pLDDT over strand residues: {strand_plddt_mean} "
-         f"({'high confidence — structured repeat core' if strand_plddt_mean > 70 else 'moderate/low — repeat core may be disordered or poorly modelled'})."),
-        (f"Best fold match: {best_fold} "
-         f"(solenoid {sol}/100 · sandwich {sand}/100 · barrel {barrel}/100). "
-         + ("Evidence is consistent with an RTX beta-solenoid architecture."
-            if best_fold == "Beta-solenoid" and sol >= 50
-            else "Structural homology search (FoldSeek) is recommended to confirm assignment.")),
-    ]
+                 else "mixed orientation")
+    reasoning: list = []
+
+    if barrel_cutoff > 0:
+        reasoning.append(
+            f"β-barrel translocator domain detected ({barrel_hit}) starting at residue "
+            f"{barrel_cutoff}. Residues {barrel_cutoff}–end excluded from strand geometry "
+            f"analysis; only the passenger domain (res 1–{barrel_cutoff - 1}) is used for "
+            f"spacing and crossing-angle statistics."
+        )
+
+    reasoning.append(
+        f"DSSP found {n_total} beta strands total; {n} in the passenger domain, "
+        f"average {round(mean_len, 1)} aa (range {min(lengths)}–{max(lengths)} aa)."
+    )
+    reasoning.append(
+        f"Passenger domain inter-strand spacing: mean {round(mean_gap, 1)} residues, "
+        f"SD {round(gap_sd, 1)} — {spacing_q}. "
+        f"Right-handed β-helix (autotransporter) typically shows SD < 8; "
+        f"RTX solenoid shows SD < 4."
+    )
+    reasoning.append(
+        f"Consecutive strand crossing angle: mean {round(mean_angle, 0):.0f}°, "
+        f"SD {round(angle_sd, 0):.0f}° — {orient_q}."
+    )
+    if at_hits:
+        reasoning.append(
+            f"Autotransporter β-helix evidence ({at_score}/100): "
+            + "; ".join(at_hits) + "."
+        )
+    if rtx_on_strands:
+        reasoning.append(
+            "RTX nonapeptide (GGXGXDXUX) detected at strand edges — "
+            "characteristic of RTX-family beta-solenoid toxins."
+        )
+    else:
+        reasoning.append(
+            "No RTX motif (GGXGXDXUX) found near strand edges — consistent with "
+            "non-RTX solenoid class (autotransporter β-helix does not use this motif)."
+        )
+    reasoning.append(
+        f"Mean pLDDT over passenger strand residues: {strand_plddt_mean} "
+        f"({'high confidence' if strand_plddt_mean > 70 else 'moderate/low'})."
+    )
+    reasoning.append(
+        f"Best fold match: {best_fold} "
+        f"(solenoid {sol} · autotransporter {at_score} · sandwich {sand} · barrel {barrel}, all /100). "
+        + ("Evidence is consistent with an autotransporter right-handed β-helix."
+           if best_fold == "Autotransporter β-helix" and at_score >= 50
+           else "Evidence is consistent with an RTX beta-solenoid architecture."
+           if best_fold == "Beta-solenoid" and sol >= 50
+           else "Structural homology search (FoldSeek) is recommended to confirm assignment.")
+    )
 
     return {
         "available":          True,
-        "n_strands":          n,
-        "strands":            strands,
+        "n_strands":          n_total,
+        "n_passenger":        n,
+        "strands":            work_strands,
+        "barrel_cutoff":      barrel_cutoff,
+        "barrel_hit":         barrel_hit,
         "lengths":            lengths,
         "mean_len":           round(mean_len, 1),
         "gaps":               gaps,
@@ -1251,6 +1400,8 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
         "rtx_on_strands":     rtx_on_strands,
         "strand_plddt_mean":  strand_plddt_mean,
         "solenoid_score":     sol,
+        "at_score":           at_score,
+        "at_hits":            at_hits,
         "sandwich_score":     sand,
         "barrel_score":       barrel,
         "best_fold":          best_fold,
@@ -1493,10 +1644,10 @@ def _beta_solenoid_html(analysis: dict, seq_len: int) -> str:
             f'{rtx_html}</div>'
         )
 
-    sol      = analysis["solenoid_score"]
     best     = analysis["best_fold"]
-    conf_col = "#22c55e" if sol > 60 else "#f59e0b" if sol > 35 else "#ef4444"
-    conf_lbl = ("High" if sol > 60 else "Moderate" if sol > 35 else "Low") + " solenoid probability"
+    best_sc  = analysis["fold_scores"][best]
+    conf_col = "#22c55e" if best_sc > 60 else "#f59e0b" if best_sc > 35 else "#ef4444"
+    conf_lbl = ("High" if best_sc > 60 else "Moderate" if best_sc > 35 else "Low") + f" confidence · {best_sc}/100"
 
     header = (
         '<div style="margin-top:16px;">'
@@ -1550,9 +1701,16 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
     # Cα coordinates for crossing-angle analysis
     ca_coords = _parse_pdb_ca_coords(pdb_text) if strands else []
 
+    # Pull InterProScan + BLAST results from session state if available
+    _results    = st.session_state.get("results", {})
+    _ipr_data   = (_results.get("InterProScan", {}) or {}).get("data")
+    _blast_data = (_results.get("BLASTp", {}) or {}).get("data")
+
     # Beta-solenoid analysis
     sol_analysis = _analyze_beta_solenoid(strands, ca_coords, plddt, seq,
-                                          dssp_available=dssp_ok)
+                                          dssp_available=dssp_ok,
+                                          ipr_data=_ipr_data,
+                                          blast_data=_blast_data)
     seq_len      = len(seq) or len(plddt) or 1
 
     col_v, col_a = st.columns([5, 4])
