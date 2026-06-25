@@ -12,6 +12,7 @@ import os
 import tarfile
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -392,103 +393,111 @@ def run_interproscan(sequence):
         )
 
 
-def run_blast(sequence):
-    url = "https://blast.ncbi.nlm.nih.gov/blast/Blast.cgi"
+def _parse_blast_xml(xml_text: str) -> dict:
+    """Parse EBI NCBI BLAST XML (EBIApplicationResult schema) into JSON2-compatible dict."""
+    try:
+        # Strip XML namespaces so we can use plain tag names in findall/iter
+        import re as _re
+        xml_clean = _re.sub(r'\s+xmlns(?::\w+)?="[^"]+"', '', xml_text)
+        xml_clean = _re.sub(r'\s+xsi:\w+="[^"]+"', '', xml_clean)
+        root = ET.fromstring(xml_clean)
+        hits = []
+        for hit in root.iter("hit"):
+            acc  = hit.get("ac") or hit.get("id") or ""
+            desc = hit.get("description") or ""
+            # Extract organism from UniProt "OS=Name OX=..." field in description
+            sciname = ""
+            if " OS=" in desc:
+                os_part = desc.split(" OS=", 1)[1]
+                sciname = os_part.split(" OX=")[0].split(" GN=")[0].strip()
+            # First alignment only
+            aln = hit.find(".//alignment")
+            if aln is None:
+                continue
+            try:
+                evalue    = float(aln.findtext("expectation", "0") or "0")
+                bit_score = float(aln.findtext("bits", "0") or "0")
+                # EBI gives identity as a percentage (e.g. 47.9); encode as count/100
+                # so that show_blast's formula (identity/align_len*100) gives the right %
+                identity_pct = float(aln.findtext("identity", "0") or "0")
+            except (ValueError, TypeError):
+                continue
+            hits.append({
+                "description": [{"accession": acc, "title": desc, "sciname": sciname}],
+                "hsps": [{"evalue": evalue, "bit_score": bit_score,
+                          "identity": identity_pct, "align_len": 100}],
+            })
+        return {"BlastOutput2": [{"report": {"results": {"search": {"hits": hits}}}}]}
+    except Exception:
+        return {"BlastOutput2": []}
 
-    # SUBMISSION — POST (not PUT), retry up to 3 times
-    rid = None
+
+def run_blast(sequence):
+    # Uses EBI NCBI BLAST Job Dispatcher — same reliable infrastructure as
+    # InterProScan and Phobius, avoids direct NCBI QBLAST connectivity issues.
+    url = "https://www.ebi.ac.uk/Tools/services/rest/ncbiblast"
+
+    # SUBMISSION — retry up to 3 times
+    jid = None
     for attempt in range(3):
         try:
-            r = requests.post(url, data={
-                "CMD": "Put", "PROGRAM": "blastp", "DATABASE": "nr",
-                "ENTREZ_QUERY": "bacteria[organism]",
-                "QUERY": sequence, "FORMAT_TYPE": "JSON2",
-                "HITLIST_SIZE": 10, "MATRIX_NAME": "BLOSUM62", "EXPECT": "0.001",
-                "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
+            r = requests.post(f"{url}/run", data={
+                "email": EMAIL, "program": "blastp",
+                "database": "uniprotkb_bacteria",
+                "sequence": sequence, "stype": "protein",
+                "scores": 10, "alignments": 10, "exp": "1e-3",
             }, timeout=60)
             r.raise_for_status()
-            rtoe = 15
-            for line in r.text.splitlines():
-                if line.startswith("    RID = "):
-                    rid = line.split("=", 1)[1].strip()
-                elif line.startswith("    RTOE = "):
-                    rtoe = max(15, int(line.split("=", 1)[1].strip()))
-            if rid:
+            jid = r.text.strip()
+            if jid:
                 break
         except Exception as exc:
             if attempt < 2:
                 time.sleep(10)
             else:
                 raise RuntimeError(f"BLASTp submission failed after 3 attempts: {exc}")
-    if not rid:
-        raise RuntimeError("BLASTp: no RID in NCBI response after 3 attempts")
+    if not jid:
+        raise RuntimeError("BLASTp: no job ID in EBI response")
 
-    print(f"[BLAST] Submitted RID={rid}, waiting {rtoe}s before first poll")
-    time.sleep(rtoe)
+    print(f"[BLAST] Submitted EBI job={jid}, waiting 10s before first poll")
+    time.sleep(10)
 
-    # POLLING — 720s total budget, 30s per individual request, 30s between polls
-    # UNKNOWN = still queued (keep polling); only READY/FAILED are terminal
-    start = time.time()
+    # POLLING — 720s total, 30s per request, 30s between polls
+    start    = time.time()
     deadline = start + 720
-    status = "WAITING"
-    poll_n = 0
+    status   = "PENDING"
+    poll_n   = 0
     while time.time() < deadline:
         poll_n += 1
         elapsed = int(time.time() - start)
         try:
-            r = requests.get(url, params={
-                "CMD": "Get", "RID": rid, "FORMAT_OBJECT": "SearchInfo",
-                "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-            }, timeout=30)
+            r = requests.get(f"{url}/status/{jid}", timeout=30)
             r.raise_for_status()
-            status = "UNKNOWN"
-            hits_line = ""
-            for line in r.text.splitlines():
-                if "Status=" in line:
-                    status = line.strip().split("=", 1)[1].strip()
-                if "ThereAreHits=" in line:
-                    hits_line = line.strip()
+            status = r.text.strip()
             print(f"[BLAST] Poll #{poll_n} at {elapsed}s elapsed: status={status}")
-            if status == "READY":
-                if "ThereAreHits=no" in hits_line:
-                    print("[BLAST] 0 hits — no bacterial homologues or very distant homology")
-                    return {"BlastOutput2": []}
+            if status == "FINISHED":
                 break
-            if status == "FAILED":
-                raise RuntimeError("BLASTp: job failed on NCBI servers")
-            # UNKNOWN / WAITING = still queued, continue polling
+            if status in ("FAILURE", "ERROR", "NOT_FOUND", "CANCELLED"):
+                raise RuntimeError(f"BLASTp job ended with status: {status}")
         except requests.exceptions.Timeout:
             print(f"[BLAST] Poll #{poll_n} request timed out (30s), retrying")
         remaining = deadline - time.time()
         if remaining > 0:
             time.sleep(min(30, remaining))
 
-    if status != "READY":
+    if status != "FINISHED":
         raise RuntimeError(
-            "BLASTp did not complete within 12 minutes — NCBI queue may be busy. "
+            "BLASTp did not complete within 12 minutes — EBI queue may be busy. "
             "Try again later."
         )
 
-    # RESULT DOWNLOAD — retry once on timeout
-    for attempt in range(2):
-        try:
-            r = requests.get(url, params={
-                "CMD": "Get", "RID": rid, "FORMAT_TYPE": "JSON2",
-                "DESCRIPTIONS": 10, "ALIGNMENTS": 10,
-                "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
-            }, timeout=60)
-            r.raise_for_status()
-            with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
-                names = [n for n in zf.namelist() if n.endswith(".json")]
-                return json.loads(zf.read(names[0]))
-        except requests.exceptions.Timeout:
-            if attempt == 0:
-                print("[BLAST] Result download timed out, retrying once")
-                time.sleep(5)
-            else:
-                raise RuntimeError("BLASTp result download timed out after retry")
-        except Exception as exc:
-            raise RuntimeError(f"BLASTp result download failed: {exc}")
+    # RESULT DOWNLOAD — XML converted to JSON2-compatible dict
+    try:
+        r = requests.get(f"{url}/result/{jid}/xml", timeout=60)
+        r.raise_for_status()
+        return _parse_blast_xml(r.text)
+    except requests.exceptions.Timeout:
+        raise RuntimeError("BLASTp result download timed out — try again in a few minutes.")
 
 
 def run_phobius(sequence):
