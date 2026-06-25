@@ -2443,6 +2443,170 @@ with col_right:
                     elif name == "HMMER":        show_hmmer(data)
                     elif name == "FoldSeek":     show_foldseek(data)
 
+# ── Debug panel (only visible when ?debug=1 is in the URL) ───────────────────
+
+_qp = st.query_params
+if _qp.get("debug") == "1":
+    st.markdown(
+        '<hr style="border:none;border-top:1px solid #1e2d4a;margin:28px 0 12px;">'
+        '<p style="color:#f59e0b;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        'text-transform:uppercase;margin:0 0 12px;">🛠 Debug Panel</p>',
+        unsafe_allow_html=True,
+    )
+    _dcol1, _dcol2 = st.columns(2)
+
+    with _dcol1:
+        if st.button("Test BLAST connection", key="dbg_blast"):
+            _test_seq = ">test\nMKTLLLTLVV"
+            with st.spinner("Submitting 10-aa test sequence to NCBI BLAST…"):
+                try:
+                    _r = requests.post(
+                        "https://blast.ncbi.nlm.nih.gov/blast/Blast.cgi",
+                        data={
+                            "CMD": "Put", "PROGRAM": "blastp", "DATABASE": "nr",
+                            "ENTREZ_QUERY": "bacteria[organism]",
+                            "QUERY": _test_seq, "FORMAT_TYPE": "JSON2",
+                            "HITLIST_SIZE": 5, "MATRIX_NAME": "BLOSUM62",
+                            "EXPECT": "0.001",
+                            "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
+                        },
+                        timeout=60,
+                    )
+                    _rid_dbg = None
+                    for _ln in _r.text.splitlines():
+                        if _ln.startswith("    RID = "):
+                            _rid_dbg = _ln.split("=", 1)[1].strip()
+                    st.markdown(
+                        f'<div style="background:rgba(34,197,94,0.08);border:1px solid '
+                        f'rgba(34,197,94,0.2);border-radius:6px;padding:10px 14px;'
+                        f'font-size:12px;color:#94a3b8;">'
+                        f'<strong style="color:#22c55e;">HTTP {_r.status_code}</strong><br>'
+                        f'RID: <code style="color:#f59e0b;">{_rid_dbg or "NOT FOUND in response"}</code><br>'
+                        f'Response length: {len(_r.text)} chars</div>',
+                        unsafe_allow_html=True,
+                    )
+                    if _rid_dbg:
+                        st.session_state["_dbg_blast_rid"] = _rid_dbg
+                except Exception as _e:
+                    st.markdown(
+                        f'<div style="background:rgba(239,68,68,0.08);border:1px solid '
+                        f'rgba(239,68,68,0.2);border-radius:6px;padding:10px 14px;'
+                        f'font-size:12px;color:#ef4444;">Submission error:<br>'
+                        f'<code>{_html.escape(str(_e))}</code></div>',
+                        unsafe_allow_html=True,
+                    )
+
+        # If we have a RID from a previous test, show a poll-once button
+        _dbg_rid = st.session_state.get("_dbg_blast_rid")
+        if _dbg_rid:
+            if st.button(f"Poll status of RID {_dbg_rid}", key="dbg_blast_poll"):
+                try:
+                    _rp = requests.get(
+                        "https://blast.ncbi.nlm.nih.gov/blast/Blast.cgi",
+                        params={
+                            "CMD": "Get", "RID": _dbg_rid,
+                            "FORMAT_OBJECT": "SearchInfo",
+                            "EMAIL": EMAIL, "TOOL": "dark-proteome-pipeline",
+                        },
+                        timeout=30,
+                    )
+                    _poll_status = "UNKNOWN"
+                    _hits_line = ""
+                    for _ln in _rp.text.splitlines():
+                        if "Status=" in _ln:
+                            _poll_status = _ln.strip().split("=", 1)[1].strip()
+                        if "ThereAreHits=" in _ln:
+                            _hits_line = _ln.strip()
+                    st.markdown(
+                        f'<div style="background:rgba(59,130,246,0.08);border:1px solid '
+                        f'rgba(59,130,246,0.2);border-radius:6px;padding:10px 14px;'
+                        f'font-size:12px;color:#94a3b8;">'
+                        f'Poll status: <strong style="color:#3b82f6;">{_poll_status}</strong><br>'
+                        f'{_html.escape(_hits_line) if _hits_line else ""}</div>',
+                        unsafe_allow_html=True,
+                    )
+                except Exception as _e:
+                    st.error(f"Poll error: {_e}")
+
+    with _dcol2:
+        if st.button("Test HMMER connection", key="dbg_hmmer"):
+            with st.spinner("Sending HEAD request to EBI HMMER endpoint…"):
+                _hmmer_url = "https://www.ebi.ac.uk/Tools/services/rest/hmmer3_hmmscan/run"
+                try:
+                    _rh = requests.head(_hmmer_url, timeout=20)
+                    st.markdown(
+                        f'<div style="background:rgba(34,197,94,0.08);border:1px solid '
+                        f'rgba(34,197,94,0.2);border-radius:6px;padding:10px 14px;'
+                        f'font-size:12px;color:#94a3b8;">'
+                        f'<strong style="color:#22c55e;">HTTP {_rh.status_code}</strong><br>'
+                        f'Server reachable ✓</div>',
+                        unsafe_allow_html=True,
+                    )
+                except Exception as _e:
+                    st.markdown(
+                        f'<div style="background:rgba(239,68,68,0.08);border:1px solid '
+                        f'rgba(239,68,68,0.2);border-radius:6px;padding:10px 14px;'
+                        f'font-size:12px;color:#ef4444;">HEAD request error:<br>'
+                        f'<code>{_html.escape(str(_e))}</code></div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # Also submit a real minimal HMMER job and report the job ID
+            st.markdown('<p style="color:#64748b;font-size:11px;margin:8px 0 4px;">Submitting minimal HMMER job…</p>', unsafe_allow_html=True)
+            _test_seq_h = ">test\nMKTLLLTLVVVTIACSFA"
+            try:
+                _rj = requests.post(
+                    _hmmer_url,
+                    data={"email": EMAIL, "sequence": _test_seq_h, "database": "pfam", "E": "1.0"},
+                    timeout=60,
+                )
+                _jid_dbg = _rj.text.strip()
+                st.markdown(
+                    f'<div style="background:rgba(59,130,246,0.08);border:1px solid '
+                    f'rgba(59,130,246,0.2);border-radius:6px;padding:10px 14px;'
+                    f'font-size:12px;color:#94a3b8;">'
+                    f'Submission HTTP {_rj.status_code}<br>'
+                    f'Job ID: <code style="color:#f59e0b;">{_html.escape(_jid_dbg[:80])}</code></div>',
+                    unsafe_allow_html=True,
+                )
+                if _jid_dbg:
+                    st.session_state["_dbg_hmmer_jid"] = _jid_dbg
+            except Exception as _e:
+                st.markdown(
+                    f'<div style="background:rgba(239,68,68,0.08);border:1px solid '
+                    f'rgba(239,68,68,0.2);border-radius:6px;padding:10px 14px;'
+                    f'font-size:12px;color:#ef4444;">HMMER submit error:<br>'
+                    f'<code>{_html.escape(str(_e))}</code></div>',
+                    unsafe_allow_html=True,
+                )
+
+        # Poll the HMMER job once if we have a stored job ID
+        _dbg_jid = st.session_state.get("_dbg_hmmer_jid")
+        if _dbg_jid:
+            if st.button(f"Poll HMMER status", key="dbg_hmmer_poll"):
+                try:
+                    _rps = requests.get(
+                        f"https://www.ebi.ac.uk/Tools/services/rest/hmmer3_hmmscan/status/{_dbg_jid}",
+                        timeout=20,
+                    )
+                    st.markdown(
+                        f'<div style="background:rgba(59,130,246,0.08);border:1px solid '
+                        f'rgba(59,130,246,0.2);border-radius:6px;padding:10px 14px;'
+                        f'font-size:12px;color:#94a3b8;">'
+                        f'HTTP {_rps.status_code} — Status: '
+                        f'<strong style="color:#3b82f6;">{_html.escape(_rps.text.strip())}</strong></div>',
+                        unsafe_allow_html=True,
+                    )
+                except Exception as _e:
+                    st.error(f"Poll error: {_e}")
+
+    st.markdown(
+        f'<p style="color:#475569;font-size:10.5px;margin-top:10px;">'
+        f'EMAIL env: {"set ✓" if EMAIL else "NOT SET ✗"} &nbsp;·&nbsp; '
+        f'Python sees outbound HTTPS: check buttons above</p>',
+        unsafe_allow_html=True,
+    )
+
 # ── Status bar ─────────────────────────────────────────────────────────────────
 
 _res_sb = st.session_state.get("results", {})
