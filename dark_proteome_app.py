@@ -2319,16 +2319,40 @@ with col_left:
         st.session_state["active_tools"] = list(tasks.keys())
 
         results: dict = {}
+        _pipeline_start = time.time()
+        print(f"[PIPELINE] Starting {len(tasks)} tools: {list(tasks.keys())}", flush=True)
         with st.spinner(f"Running {len(tasks)} tools in parallel — typically 8–12 min…"):
             with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
                 futures = {pool.submit(fn, arg): name for name, (fn, arg) in tasks.items()}
                 for future in as_completed(futures):
                     name = futures[future]
+                    elapsed = round(time.time() - _pipeline_start, 1)
                     try:
-                        results[name] = {"ok": True,  "data": future.result()}
+                        data = future.result()
+                        results[name] = {"ok": True, "data": data}
+                        # Log hit counts for BLAST and HMMER to confirm data is real
+                        if name == "BLASTp":
+                            try:
+                                _hits = (data.get("BlastOutput2", [{}])[0]
+                                         .get("report", {}).get("results", {})
+                                         .get("search", {}).get("hits", []))
+                                print(f"[PIPELINE] {name} completed at {elapsed}s — {len(_hits)} hits", flush=True)
+                            except Exception:
+                                print(f"[PIPELINE] {name} completed at {elapsed}s — (could not count hits)", flush=True)
+                        elif name == "HMMER":
+                            _rows = sum(1 for ln in (data or "").splitlines()
+                                        if ln.strip() and not ln.startswith("#")
+                                        and not ln.startswith(" "))
+                            print(f"[PIPELINE] {name} completed at {elapsed}s — ~{_rows} result lines", flush=True)
+                        else:
+                            print(f"[PIPELINE] {name} completed at {elapsed}s — ok", flush=True)
                     except Exception as exc:
                         results[name] = {"ok": False, "error": str(exc)}
+                        print(f"[PIPELINE] {name} FAILED at {elapsed}s — {exc}", flush=True)
 
+        print(f"[PIPELINE] All tools done in {round(time.time()-_pipeline_start,1)}s. "
+              f"ok={[k for k,v in results.items() if v['ok']]} "
+              f"failed={[k for k,v in results.items() if not v['ok']]}", flush=True)
         st.session_state["results"]    = results
         st.session_state["fasta_text"] = fasta_text
         st.session_state["pdb_text"]   = pdb_text

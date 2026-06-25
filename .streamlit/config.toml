@@ -2,3 +2,4 @@
 headless = true
 enableCORS = false
 enableXsrfProtection = false
+scriptRunTimeoutSeconds = 1800
