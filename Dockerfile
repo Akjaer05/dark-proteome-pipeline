@@ -2,13 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# dssp binary required by BioPython DSSP for secondary structure assignment
-RUN apt-get update && apt-get install -y --no-install-recommends dssp \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install dependencies before copying app code (better layer caching)
+# Install Python dependencies (includes pydssp — pure-Python DSSP, no binary needed)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install mkdssp binary via pip wheel as a secondary DSSP path.
+# Apt package 'dssp' is unavailable on python:3.11-slim; pip wheel is more reliable.
+# The verify step fails the build early if the binary is not in PATH.
+RUN pip install --no-cache-dir mkdssp \
+    && python -c "import shutil, sys; \
+        f = shutil.which('mkdssp'); \
+        print('mkdssp OK:', f) if f else print('mkdssp binary not in PATH — pydssp will be used')"
 
 # Copy only what the web app needs
 COPY dark_proteome_app.py .

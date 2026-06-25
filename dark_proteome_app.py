@@ -834,8 +834,26 @@ def _parse_pdb_plddts(pdb_text: str) -> list:
     return scores
 
 
-def _calc_dssp(pdb_text: str):
-    """Return {H, E, C: pct} via DSSP, or None if the binary is unavailable."""
+def _run_dssp_raw(pdb_text: str):
+    """Return per-residue SS code list, or None on total failure.
+
+    Strategy (in order):
+      1. pydssp — pure-Python DSSP, no binary, works everywhere if installed.
+         Returns 3-state codes ('H', 'E', 'C').
+      2. mkdssp / dssp binary via BioPython DSSP wrapper.
+         Returns 8-state DSSP codes; downstream code handles both.
+    """
+    # ── 1. pydssp (pure Python) ───────────────────────────────────────────
+    try:
+        import pydssp
+        raw    = pydssp.read_pdbtext(pdb_text)
+        coords = raw[0] if isinstance(raw, tuple) else raw
+        ss_arr = pydssp.assign(coords, out_type="c3")
+        return [str(s) for s in ss_arr]
+    except Exception:
+        pass  # fall through to binary
+
+    # ── 2. mkdssp / dssp binary via BioPython ────────────────────────────
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure("p", io.StringIO(pdb_text))
     model = structure[0]
@@ -845,26 +863,13 @@ def _calc_dssp(pdb_text: str):
         pdbio.save(f)
         tmppath = f.name
     try:
-        dssp_obj = None
         for exe in ("mkdssp", "dssp"):
             try:
                 dssp_obj = DSSP(model, tmppath, dssp=exe)
-                break
+                return [dssp_obj[k][2] for k in dssp_obj]
             except Exception:
                 continue
-        if dssp_obj is None:
-            return None
-        counts = {"H": 0, "E": 0, "C": 0}
-        for key in dssp_obj:
-            ss = dssp_obj[key][2]
-            if ss in ("H", "G", "I"):
-                counts["H"] += 1
-            elif ss in ("E", "B"):
-                counts["E"] += 1
-            else:
-                counts["C"] += 1
-        total = sum(counts.values())
-        return {k: round(v / total * 100, 1) for k, v in counts.items()} if total else None
+        return None
     except Exception:
         return None
     finally:
@@ -1038,50 +1043,30 @@ def _features_html(scores: list, seq: str, phobius_text) -> str:
 # ── Beta-solenoid detector ────────────────────────────────────────────────────
 
 def _run_dssp_strands(pdb_text: str):
-    """Run DSSP once; return (strand_list, pct_dict) or ([], None).
-    strand_list: [(start, end), ...] 1-based indices of E/B residue runs."""
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("p", io.StringIO(pdb_text))
-    model = structure[0]
-    pdbio = PDBIO()
-    pdbio.set_structure(structure)
-    with tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False) as f:
-        pdbio.save(f)
-        tmppath = f.name
-    try:
-        dssp_obj = None
-        for exe in ("mkdssp", "dssp"):
-            try:
-                dssp_obj = DSSP(model, tmppath, dssp=exe)
-                break
-            except Exception:
-                continue
-        if dssp_obj is None:
-            return [], None
-        ss_list = [dssp_obj[k][2] for k in dssp_obj]
-        strands: list = []
-        in_s = False
-        s0   = 0
-        for i, ss in enumerate(ss_list):
-            if ss in ("E", "B") and not in_s:
-                in_s, s0 = True, i + 1
-            elif ss not in ("E", "B") and in_s:
-                in_s = False
-                strands.append((s0, i))
-        if in_s:
-            strands.append((s0, len(ss_list)))
-        counts = {"H": 0, "E": 0, "C": 0}
-        for ss in ss_list:
-            if ss in ("H", "G", "I"):   counts["H"] += 1
-            elif ss in ("E", "B"):      counts["E"] += 1
-            else:                       counts["C"] += 1
-        total = sum(counts.values())
-        pct = {k: round(v / total * 100, 1) for k, v in counts.items()} if total else None
-        return strands, pct
-    except Exception:
+    """Return (strand_list, pct_dict) or ([], None).
+    strand_list: [(start, end), ...] 1-based indices of beta-strand runs."""
+    ss_list = _run_dssp_raw(pdb_text)
+    if ss_list is None:
         return [], None
-    finally:
-        os.unlink(tmppath)
+    strands: list = []
+    in_s, s0 = False, 0
+    for i, ss in enumerate(ss_list):
+        beta = ss in ("E", "B")
+        if beta and not in_s:
+            in_s, s0 = True, i + 1
+        elif not beta and in_s:
+            in_s = False
+            strands.append((s0, i))
+    if in_s:
+        strands.append((s0, len(ss_list)))
+    counts = {"H": 0, "E": 0, "C": 0}
+    for ss in ss_list:
+        if ss in ("H", "G", "I"): counts["H"] += 1
+        elif ss in ("E", "B"):    counts["E"] += 1
+        else:                     counts["C"] += 1
+    total = sum(counts.values())
+    pct = {k: round(v / total * 100, 1) for k, v in counts.items()} if total else None
+    return strands, pct
 
 
 def _parse_pdb_ca_coords(pdb_text: str) -> list:
@@ -1626,50 +1611,26 @@ def _parse_ipr_domains(data) -> list:
 
 
 def _dssp_segments(pdb_text: str) -> list:
-    """Return [(start, end, type)] where type in H/E/C/D (D=disordered by pLDDT<50)."""
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("p", io.StringIO(pdb_text))
-    model = structure[0]
-    pdbio = PDBIO()
-    pdbio.set_structure(structure)
-    with tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False) as f:
-        pdbio.save(f)
-        tmppath = f.name
-    res_info = []
-    for chain in model:
-        for res in chain:
-            if "CA" in res:
-                res_info.append(["?", res["CA"].get_bfactor()])
-    try:
-        dssp_obj = None
-        for exe in ("mkdssp", "dssp"):
-            try:
-                dssp_obj = DSSP(model, tmppath, dssp=exe)
-                break
-            except Exception:
-                continue
-        if dssp_obj:
-            for ri, key in enumerate(dssp_obj):
-                if ri < len(res_info):
-                    res_info[ri][0] = dssp_obj[key][2]
-    except Exception:
-        pass
-    finally:
-        os.unlink(tmppath)
-    if not res_info:
+    """Return [(start, end, type)] where type in H/E/C/D (D = pLDDT < 50)."""
+    ss_list = _run_dssp_raw(pdb_text)
+    plddts  = _parse_pdb_plddts(pdb_text)
+    n = max(len(ss_list or []), len(plddts))
+    if n == 0:
         return []
-    def _t(ss, bf):
-        if bf < 50:    return "D"
+    def _t(i):
+        bf = plddts[i] if i < len(plddts) else 100.0
+        ss = ss_list[i] if ss_list and i < len(ss_list) else "C"
+        if bf < 50:               return "D"
         if ss in ("H", "G", "I"): return "H"
         if ss in ("E", "B"):      return "E"
         return "C"
-    segs, start, cur = [], 1, _t(*res_info[0])
-    for i, (ss, bf) in enumerate(res_info[1:], start=2):
-        t = _t(ss, bf)
+    segs, start, cur = [], 1, _t(0)
+    for i in range(1, n):
+        t = _t(i)
         if t != cur:
-            segs.append((start, i - 1, cur))
-            start, cur = i, t
-    segs.append((start, len(res_info), cur))
+            segs.append((start, i, cur))
+            start, cur = i + 1, t
+    segs.append((start, n, cur))
     return segs
 
 
