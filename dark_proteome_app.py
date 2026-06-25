@@ -1099,10 +1099,13 @@ def _parse_pdb_ca_coords(pdb_text: str) -> list:
     return coords
 
 
-def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str) -> dict:
+def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str,
+                            dssp_available: bool = True) -> dict:
+    rtx_hits = _rtx_matches(seq) if seq else []
     n = len(strands)
     if n < 2:
-        return {"available": False, "n_strands": n}
+        return {"available": False, "n_strands": n,
+                "dssp_available": dssp_available, "rtx_hits": rtx_hits}
 
     lengths  = [e - s + 1 for s, e in strands]
     mean_len = sum(lengths) / n
@@ -1431,15 +1434,49 @@ def _reasoning_chain_html(reasoning: list) -> str:
 
 def _beta_solenoid_html(analysis: dict, seq_len: int) -> str:
     if not analysis.get("available"):
-        n = analysis.get("n_strands", 0)
-        msg = (f"Only {n} beta strand(s) detected — insufficient for solenoid analysis (need ≥2)."
-               if n is not None else
-               "DSSP binary not available; secondary structure is required for this analysis.")
+        n        = analysis.get("n_strands", 0)
+        dssp_ok  = analysis.get("dssp_available", True)
+        rtx_hits = analysis.get("rtx_hits", [])
+
+        if not dssp_ok:
+            msg = ("DSSP binary (mkdssp/dssp) not found — install it to enable "
+                   "strand-based solenoid analysis. Sequence-only results shown below.")
+        elif n < 2:
+            msg = (f"Only {n} beta strand(s) detected by DSSP — "
+                   f"insufficient for solenoid scoring (need ≥2).")
+        else:
+            msg = "Beta-solenoid analysis unavailable."
+
+        # RTX motif box — shown even when DSSP is missing
+        rtx_html = ""
+        if rtx_hits:
+            positions = ", ".join(f"{s}–{e}" for s, e in rtx_hits[:6])
+            extra = f" (+{len(rtx_hits)-6} more)" if len(rtx_hits) > 6 else ""
+            rtx_html = (
+                '<div style="background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.25);'
+                'border-radius:7px;padding:10px 14px;margin-top:10px;">'
+                '<div style="color:#a855f7;font-size:11.5px;font-weight:600;margin-bottom:4px;">'
+                f'✓ {len(rtx_hits)} RTX nonapeptide motif(s) detected</div>'
+                '<div style="color:#94a3b8;font-size:11px;">'
+                f'Positions: {_esc(positions + extra)}</div>'
+                '<div style="color:#64748b;font-size:10.5px;margin-top:3px;">'
+                'GGXGXDXUX pattern — characteristic of RTX-family beta-solenoid toxins.</div>'
+                '</div>'
+            )
+        else:
+            rtx_html = (
+                '<div style="background:rgba(71,85,105,0.08);border:1px solid rgba(71,85,105,0.2);'
+                'border-radius:7px;padding:10px 14px;margin-top:10px;">'
+                '<div style="color:#475569;font-size:11.5px;">'
+                '✗ No RTX nonapeptide motif (GGXGXDXUX) detected in sequence.</div></div>'
+            )
+
         return (
             '<div style="margin-top:16px;">'
             '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
             'text-transform:uppercase;margin:0 0 8px;">Beta-solenoid Detector</p>'
-            f'<p style="color:#334155;font-size:11.5px;">{_esc(msg)}</p></div>'
+            f'<p style="color:#64748b;font-size:11.5px;margin:0 0 2px;">{_esc(msg)}</p>'
+            f'{rtx_html}</div>'
         )
 
     sol      = analysis["solenoid_score"]
@@ -1492,13 +1529,16 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
             pass
 
     # Single DSSP run — yields strand segments + SS percentages
+    # ss is None when the dssp/mkdssp binary is unavailable
     strands, ss = _run_dssp_strands(pdb_text)
+    dssp_ok = ss is not None
 
     # Cα coordinates for crossing-angle analysis
     ca_coords = _parse_pdb_ca_coords(pdb_text) if strands else []
 
     # Beta-solenoid analysis
-    sol_analysis = _analyze_beta_solenoid(strands, ca_coords, plddt, seq)
+    sol_analysis = _analyze_beta_solenoid(strands, ca_coords, plddt, seq,
+                                          dssp_available=dssp_ok)
     seq_len      = len(seq) or len(plddt) or 1
 
     col_v, col_a = st.columns([5, 4])
