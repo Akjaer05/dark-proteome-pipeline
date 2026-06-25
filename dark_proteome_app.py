@@ -1035,12 +1035,448 @@ def _features_html(scores: list, seq: str, phobius_text) -> str:
     )
 
 
+# ── Beta-solenoid detector ────────────────────────────────────────────────────
+
+def _run_dssp_strands(pdb_text: str):
+    """Run DSSP once; return (strand_list, pct_dict) or ([], None).
+    strand_list: [(start, end), ...] 1-based indices of E/B residue runs."""
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("p", io.StringIO(pdb_text))
+    model = structure[0]
+    pdbio = PDBIO()
+    pdbio.set_structure(structure)
+    with tempfile.NamedTemporaryFile(suffix=".pdb", mode="w", delete=False) as f:
+        pdbio.save(f)
+        tmppath = f.name
+    try:
+        dssp_obj = None
+        for exe in ("mkdssp", "dssp"):
+            try:
+                dssp_obj = DSSP(model, tmppath, dssp=exe)
+                break
+            except Exception:
+                continue
+        if dssp_obj is None:
+            return [], None
+        ss_list = [dssp_obj[k][2] for k in dssp_obj]
+        strands: list = []
+        in_s = False
+        s0   = 0
+        for i, ss in enumerate(ss_list):
+            if ss in ("E", "B") and not in_s:
+                in_s, s0 = True, i + 1
+            elif ss not in ("E", "B") and in_s:
+                in_s = False
+                strands.append((s0, i))
+        if in_s:
+            strands.append((s0, len(ss_list)))
+        counts = {"H": 0, "E": 0, "C": 0}
+        for ss in ss_list:
+            if ss in ("H", "G", "I"):   counts["H"] += 1
+            elif ss in ("E", "B"):      counts["E"] += 1
+            else:                       counts["C"] += 1
+        total = sum(counts.values())
+        pct = {k: round(v / total * 100, 1) for k, v in counts.items()} if total else None
+        return strands, pct
+    except Exception:
+        return [], None
+    finally:
+        os.unlink(tmppath)
+
+
+def _parse_pdb_ca_coords(pdb_text: str) -> list:
+    """Return [(x, y, z)] for Cα atoms in chain/residue order (first model)."""
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("p", io.StringIO(pdb_text))
+    coords = []
+    for model in structure:
+        for chain in model:
+            for res in chain:
+                if "CA" in res:
+                    v = res["CA"].get_vector()
+                    coords.append((float(v[0]), float(v[1]), float(v[2])))
+        break
+    return coords
+
+
+def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str) -> dict:
+    n = len(strands)
+    if n < 2:
+        return {"available": False, "n_strands": n}
+
+    lengths  = [e - s + 1 for s, e in strands]
+    mean_len = sum(lengths) / n
+    gaps     = [strands[i+1][0] - strands[i][1] - 1 for i in range(n - 1)]
+    mean_gap = sum(gaps) / len(gaps) if gaps else 0
+    gap_sd   = (math.sqrt(sum((g - mean_gap)**2 for g in gaps) / len(gaps))
+                if len(gaps) > 1 else 0)
+
+    # Strand direction unit vectors from Cα positions
+    def _norm(v):
+        m = math.sqrt(sum(x*x for x in v))
+        return tuple(x/m for x in v) if m > 0 else (0.0, 0.0, 0.0)
+
+    strand_dirs = []
+    for s, e in strands:
+        s0, e0 = s - 1, e - 1
+        if 0 <= s0 < len(ca_coords) and 0 <= e0 < len(ca_coords):
+            v = tuple(ca_coords[e0][j] - ca_coords[s0][j] for j in range(3))
+            strand_dirs.append(_norm(v))
+        else:
+            strand_dirs.append(None)
+
+    # Crossing angles (degrees) between consecutive strands
+    angles = []
+    for i in range(len(strand_dirs) - 1):
+        v1, v2 = strand_dirs[i], strand_dirs[i+1]
+        if v1 and v2:
+            cos_a = max(-1.0, min(1.0, sum(a*b for a, b in zip(v1, v2))))
+            angles.append(math.degrees(math.acos(cos_a)))
+
+    mean_angle       = sum(angles) / len(angles) if angles else 0
+    angle_sd         = (math.sqrt(sum((a - mean_angle)**2 for a in angles) / len(angles))
+                        if len(angles) > 1 else 0)
+    parallel_pct     = round(sum(1 for a in angles if a < 45)  / len(angles) * 100) if angles else 0
+    antiparallel_pct = round(sum(1 for a in angles if a > 135) / len(angles) * 100) if angles else 0
+
+    # RTX motif → check proximity to any strand (±3 residues of edge)
+    rtx_hits = _rtx_matches(seq) if seq else []
+    rtx_on_strands = any(
+        not (re < s - 3 or rs > e + 3)
+        for rs, re in rtx_hits
+        for s, e in strands
+    )
+
+    # Mean pLDDT over strand residues
+    strand_pl = [plddt[i] for s, e in strands for i in range(s - 1, min(e, len(plddt)))]
+    strand_plddt_mean = round(sum(strand_pl) / len(strand_pl), 1) if strand_pl else 0
+
+    # ── Fold scores (0–100) ──────────────────────────────────────────────────
+    # Beta-solenoid
+    sol  = min(30, n * 4)
+    sol += max(0, int(30 - gap_sd * 6))
+    sol += round(max(parallel_pct, antiparallel_pct) * 0.2) if angles else 0
+    sol += 15 if rtx_on_strands else 0
+    sol += 5  if strand_plddt_mean > 70 else 0
+    sol  = min(100, max(0, sol))
+
+    # Beta-sandwich
+    sand  = 25 if 4 <= n <= 14 else 0
+    sand += min(25, int(mean_len * 2))
+    sand += int(antiparallel_pct * 0.2)
+    sand += 15 if gap_sd > 3 else 0
+    sand += 5  if strand_plddt_mean > 70 else 0
+    sand  = min(100, max(0, sand))
+
+    # Beta-barrel
+    barrel  = 30 if 8 <= n <= 24 else 0
+    barrel += int(antiparallel_pct * 0.25)
+    barrel += 20 if 1 <= mean_gap <= 5 else 0
+    barrel += max(0, int(20 - gap_sd * 3))
+    barrel += 15 if 5 <= mean_len <= 12 else 0
+    barrel  = min(100, max(0, barrel))
+
+    fold_scores = {"Beta-solenoid": sol, "Beta-sandwich": sand, "Beta-barrel": barrel}
+    best_fold   = max(fold_scores, key=fold_scores.get)
+
+    # ── 4 classification criteria ─────────────────────────────────────────────
+    criteria = {
+        "Regular strand spacing":    gap_sd < 4.0,
+        "Parallel orientation":      parallel_pct > 60,
+        "RTX sequence motif":        rtx_on_strands,
+        "High pLDDT in repeat core": strand_plddt_mean > 70,
+    }
+
+    # ── Reasoning chain ───────────────────────────────────────────────────────
+    spacing_q = "regular (solenoid-consistent)" if gap_sd < 4 else "irregular"
+    orient_q  = (f"{parallel_pct}% parallel — solenoid-consistent" if parallel_pct > 60
+                 else f"{antiparallel_pct}% antiparallel — barrel/sandwich-like" if antiparallel_pct > 60
+                 else "mixed orientation, inconclusive")
+    reasoning = [
+        (f"DSSP assigned {n} beta strand{'s' if n != 1 else ''}, "
+         f"average {round(mean_len, 1)} aa (range {min(lengths)}–{max(lengths)} aa). "
+         f"Solenoids typically have many short strands (≥6, 3–8 aa)."),
+        (f"Inter-strand spacing: mean {round(mean_gap, 1)} residues, "
+         f"SD {round(gap_sd, 1)} — {spacing_q}. "
+         f"Beta-solenoids show very low SD (<4) due to regular turn geometry."),
+        (f"Consecutive strand crossing angle: mean {round(mean_angle, 0):.0f}°, "
+         f"SD {round(angle_sd, 0):.0f}° — {orient_q}. "
+         f"Solenoids show uniform parallel (~0°) or antiparallel (~180°) strand packing."),
+        ("RTX nonapeptide (GGXGXDXUX) detected at strand edges — "
+         "a defining motif of RTX-family beta-solenoid toxins."
+         if rtx_on_strands
+         else "No RTX motif (GGXGXDXUX) found near strand edges. "
+              "Absence reduces RTX solenoid probability but does not exclude other solenoid classes."),
+        (f"Mean pLDDT over strand residues: {strand_plddt_mean} "
+         f"({'high confidence — structured repeat core' if strand_plddt_mean > 70 else 'moderate/low — repeat core may be disordered or poorly modelled'})."),
+        (f"Best fold match: {best_fold} "
+         f"(solenoid {sol}/100 · sandwich {sand}/100 · barrel {barrel}/100). "
+         + ("Evidence is consistent with an RTX beta-solenoid architecture."
+            if best_fold == "Beta-solenoid" and sol >= 50
+            else "Structural homology search (FoldSeek) is recommended to confirm assignment.")),
+    ]
+
+    return {
+        "available":          True,
+        "n_strands":          n,
+        "strands":            strands,
+        "lengths":            lengths,
+        "mean_len":           round(mean_len, 1),
+        "gaps":               gaps,
+        "mean_gap":           round(mean_gap, 1),
+        "gap_sd":             round(gap_sd, 1),
+        "angles":             [round(a, 1) for a in angles],
+        "mean_angle":         round(mean_angle, 1),
+        "angle_sd":           round(angle_sd, 1),
+        "parallel_pct":       parallel_pct,
+        "antiparallel_pct":   antiparallel_pct,
+        "rtx_hits":           rtx_hits,
+        "rtx_on_strands":     rtx_on_strands,
+        "strand_plddt_mean":  strand_plddt_mean,
+        "solenoid_score":     sol,
+        "sandwich_score":     sand,
+        "barrel_score":       barrel,
+        "best_fold":          best_fold,
+        "criteria":           criteria,
+        "reasoning":          reasoning,
+        "fold_scores":        fold_scores,
+    }
+
+
+def _solenoid_strand_viz_html(analysis: dict, seq_len: int) -> str:
+    strands  = analysis["strands"]
+    angles   = analysis.get("angles", [])
+    rtx_hits = analysis.get("rtx_hits", [])
+    if not strands:
+        return ""
+
+    W, H   = 660, 70
+    LM, RM = 8, 8
+    TW     = W - LM - RM
+    Y      = 40
+    AH     = 14
+
+    def sx(pos):
+        return LM + (pos - 1) / max(seq_len - 1, 1) * TW
+
+    palette = ["#3b82f6", "#22c55e"]
+    els: list[str] = []
+
+    # Backbone rail
+    els.append(
+        f'<line x1="{LM}" y1="{Y}" x2="{LM+TW}" y2="{Y}" '
+        f'stroke="#1e2d4a" stroke-width="1.5"/>'
+    )
+
+    # Orientation arcs between consecutive strands
+    for i, angle in enumerate(angles):
+        if i + 1 >= len(strands):
+            break
+        x1  = sx(strands[i][1])
+        x2  = sx(strands[i+1][0])
+        mid = (x1 + x2) / 2
+        is_par = angle < 45
+        col = "#3b82f6" if is_par else "#f97316"
+        arc_y = Y - 18
+        label = "Parallel" if is_par else "Antiparallel"
+        els.append(
+            f'<path d="M{x1:.1f},{Y-AH//2} Q{mid:.1f},{arc_y} {x2:.1f},{Y-AH//2}" '
+            f'fill="none" stroke="{col}" stroke-width="1.2" stroke-dasharray="3,2" opacity="0.7">'
+            f'<title>{label} ({angle:.0f}°)</title></path>'
+        )
+
+    # Strand arrow bars
+    for i, (s, e) in enumerate(strands):
+        col = palette[i % 2]
+        x1, x2 = sx(s), sx(e)
+        w = max(x2 - x1, 3.0)
+        els.append(
+            f'<rect x="{x1:.1f}" y="{Y-AH//2}" width="{w:.1f}" height="{AH}" '
+            f'rx="2" fill="{col}" opacity="0.85">'
+            f'<title>Strand {i+1}: residues {s}–{e} ({e-s+1} aa)</title></rect>'
+        )
+        if w > 8:
+            ax = min(x1 + w, LM + TW - 1)
+            ah2 = AH // 2
+            els.append(
+                f'<polygon points="{ax:.1f},{Y-ah2} {min(ax+5, LM+TW):.1f},{Y} {ax:.1f},{Y+ah2}" '
+                f'fill="{col}" opacity="0.85"/>'
+            )
+        if w > 15:
+            els.append(
+                f'<text x="{(x1+x2)/2:.1f}" y="{Y+4.5}" text-anchor="middle" '
+                f'font-size="7" fill="#f0f6ff" font-family="monospace" '
+                f'pointer-events="none">{i+1}</text>'
+            )
+
+    # RTX motif diamonds above the backbone
+    for rs, re in rtx_hits:
+        mx = sx((rs + re) / 2)
+        els.append(
+            f'<polygon points="{mx:.1f},{Y-AH-8} {mx+4:.1f},{Y-AH-3} '
+            f'{mx:.1f},{Y-AH+2} {mx-4:.1f},{Y-AH-3}" fill="#a855f7" opacity="0.9">'
+            f'<title>RTX motif {rs}–{re}</title></polygon>'
+        )
+
+    # Ruler ticks
+    tick_step = max(10, round(seq_len / 8 / 10) * 10)
+    for t in list(range(1, seq_len + 1, tick_step)) + [seq_len]:
+        tx     = sx(t)
+        anchor = "start" if t == 1 else ("end" if t == seq_len else "middle")
+        els.append(
+            f'<line x1="{tx:.1f}" y1="{Y+AH//2+2}" x2="{tx:.1f}" y2="{Y+AH//2+6}" '
+            f'stroke="#1e2d4a" stroke-width="1"/>'
+        )
+        els.append(
+            f'<text x="{tx:.1f}" y="{Y+AH//2+15}" text-anchor="{anchor}" '
+            f'font-size="8" fill="#334155" font-family="monospace">{t}</text>'
+        )
+
+    # Legend row
+    lx = LM
+    ly = 10
+    for lbl, col in [("Strand A", "#3b82f6"), ("Strand B", "#22c55e")]:
+        els.append(f'<rect x="{lx}" y="{ly-7}" width="10" height="8" rx="1" fill="{col}"/>')
+        els.append(
+            f'<text x="{lx+13}" y="{ly}" font-size="7.5" fill="#475569" '
+            f'font-family="-apple-system,sans-serif">{lbl}</text>'
+        )
+        lx += 65
+    for lbl, col in [("Parallel", "#3b82f6"), ("Antiparallel", "#f97316")]:
+        els.append(
+            f'<line x1="{lx}" y1="{ly-4}" x2="{lx+14}" y2="{ly-4}" '
+            f'stroke="{col}" stroke-width="1.3" stroke-dasharray="3,2"/>'
+        )
+        els.append(
+            f'<text x="{lx+17}" y="{ly}" font-size="7.5" fill="#475569" '
+            f'font-family="-apple-system,sans-serif">{lbl}</text>'
+        )
+        lx += 80
+    if rtx_hits:
+        els.append(
+            f'<polygon points="{lx},{ly-7} {lx+4},{ly-3} {lx},{ly+1} {lx-4},{ly-3}" '
+            f'fill="#a855f7"/>'
+        )
+        els.append(
+            f'<text x="{lx+7}" y="{ly}" font-size="7.5" fill="#475569" '
+            f'font-family="-apple-system,sans-serif">RTX motif</text>'
+        )
+
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
+        f'width="100%" style="display:block;">'
+        f'<rect width="{W}" height="{H}" fill="#080c17"/>'
+        f'{"".join(els)}</svg>'
+    )
+
+
+def _fold_scores_html(fold_scores: dict, best: str) -> str:
+    rows = ""
+    for fold, score in fold_scores.items():
+        is_best = fold == best
+        col     = "#3b82f6" if is_best else "#334155"
+        lc      = "#f0f6ff" if is_best else "#64748b"
+        glow    = f"box-shadow:0 0 6px {col}66;" if is_best else ""
+        rows += (
+            f'<div style="margin-bottom:10px;">'
+            f'<div style="display:flex;justify-content:space-between;margin-bottom:3px;">'
+            f'<span style="color:{lc};font-size:12px;font-weight:{"600" if is_best else "400"};">'
+            f'{_esc(fold)}{" ✓" if is_best else ""}</span>'
+            f'<span style="color:{lc};font-size:12px;font-weight:600;">{score}/100</span></div>'
+            f'<div style="background:#0d1424;border-radius:3px;height:6px;">'
+            f'<div style="background:{col};width:{score}%;height:100%;border-radius:3px;{glow}">'
+            f'</div></div></div>'
+        )
+    return (
+        '<div style="margin-top:16px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        f'text-transform:uppercase;margin:0 0 10px;">Fold Type Score</p>{rows}</div>'
+    )
+
+
+def _criteria_cards_html(criteria: dict) -> str:
+    items = ""
+    for label, passed in criteria.items():
+        icon = "✓" if passed else "✗"
+        col  = "#22c55e" if passed else "#ef4444"
+        bg   = "rgba(34,197,94,0.07)"  if passed else "rgba(239,68,68,0.07)"
+        bdr  = "rgba(34,197,94,0.2)"   if passed else "rgba(239,68,68,0.2)"
+        items += (
+            f'<div style="background:{bg};border:1px solid {bdr};border-radius:7px;'
+            f'padding:8px 12px;display:flex;align-items:center;gap:8px;">'
+            f'<span style="color:{col};font-size:14px;font-weight:700;flex-shrink:0;">{icon}</span>'
+            f'<span style="color:#94a3b8;font-size:11px;">{_esc(label)}</span></div>'
+        )
+    return (
+        '<div style="margin-top:16px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        'text-transform:uppercase;margin:0 0 10px;">Classification Criteria</p>'
+        f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">{items}</div></div>'
+    )
+
+
+def _reasoning_chain_html(reasoning: list) -> str:
+    items = "".join(
+        f'<li style="color:#64748b;font-size:11px;line-height:1.65;margin-bottom:7px;">'
+        f'{_esc(s)}</li>'
+        for s in reasoning
+    )
+    return (
+        '<div style="margin-top:16px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        f'text-transform:uppercase;margin:0 0 10px;">Reasoning Chain</p>'
+        f'<ol style="margin:0;padding-left:18px;">{items}</ol></div>'
+    )
+
+
+def _beta_solenoid_html(analysis: dict, seq_len: int) -> str:
+    if not analysis.get("available"):
+        n = analysis.get("n_strands", 0)
+        msg = (f"Only {n} beta strand(s) detected — insufficient for solenoid analysis (need ≥2)."
+               if n is not None else
+               "DSSP binary not available; secondary structure is required for this analysis.")
+        return (
+            '<div style="margin-top:16px;">'
+            '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+            'text-transform:uppercase;margin:0 0 8px;">Beta-solenoid Detector</p>'
+            f'<p style="color:#334155;font-size:11.5px;">{_esc(msg)}</p></div>'
+        )
+
+    sol      = analysis["solenoid_score"]
+    best     = analysis["best_fold"]
+    conf_col = "#22c55e" if sol > 60 else "#f59e0b" if sol > 35 else "#ef4444"
+    conf_lbl = ("High" if sol > 60 else "Moderate" if sol > 35 else "Low") + " solenoid probability"
+
+    header = (
+        '<div style="margin-top:16px;">'
+        '<div style="display:flex;align-items:center;justify-content:space-between;'
+        'flex-wrap:wrap;gap:6px;margin-bottom:10px;">'
+        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
+        'text-transform:uppercase;margin:0;">Beta-solenoid Detector</p>'
+        f'<span style="background:{conf_col}22;border:1px solid {conf_col}55;'
+        f'border-radius:999px;padding:2px 9px;font-size:10px;color:{conf_col};font-weight:600;">'
+        f'{conf_lbl} · Best: {_esc(best)}</span></div>'
+    )
+
+    viz      = _solenoid_strand_viz_html(analysis, seq_len)
+    scores_h = _fold_scores_html(analysis["fold_scores"], best)
+    crit_h   = _criteria_cards_html(analysis["criteria"])
+    chain_h  = _reasoning_chain_html(analysis["reasoning"])
+
+    return (
+        header
+        + f'<div style="background:#080c17;border:1px solid #1e2d4a;border-radius:8px;'
+          f'padding:10px 8px 4px;overflow-x:auto;">{viz}</div>'
+        + scores_h + crit_h + chain_h + "</div>"
+    )
+
+
 # ── Structure tab — main display function ─────────────────────────────────────
 
 def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
-    plddt  = _parse_pdb_plddts(pdb_text)
+    plddt   = _parse_pdb_plddts(pdb_text)
     mean_pl = round(sum(plddt) / len(plddt), 1) if plddt else 0
-    seq    = _parse_fasta_seq(fasta_text) if fasta_text else ""
+    seq     = _parse_fasta_seq(fasta_text) if fasta_text else ""
 
     seq_props = None
     if seq:
@@ -1055,7 +1491,15 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
         except Exception:
             pass
 
-    ss = _calc_dssp(pdb_text)
+    # Single DSSP run — yields strand segments + SS percentages
+    strands, ss = _run_dssp_strands(pdb_text)
+
+    # Cα coordinates for crossing-angle analysis
+    ca_coords = _parse_pdb_ca_coords(pdb_text) if strands else []
+
+    # Beta-solenoid analysis
+    sol_analysis = _analyze_beta_solenoid(strands, ca_coords, plddt, seq)
+    seq_len      = len(seq) or len(plddt) or 1
 
     col_v, col_a = st.columns([5, 4])
 
@@ -1063,6 +1507,8 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
         components.html(_3dmol_html(pdb_text, height=440), height=494, scrolling=False)
         if plddt:
             st.markdown(_plddt_bar_html(plddt), unsafe_allow_html=True)
+        # Beta-solenoid detector section (below pLDDT bar)
+        st.markdown(_beta_solenoid_html(sol_analysis, seq_len), unsafe_allow_html=True)
 
     with col_a:
         if seq_props:
