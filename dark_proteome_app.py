@@ -14,7 +14,6 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 import requests
@@ -2359,58 +2358,69 @@ with col_left:
     )
 
     if run:
-        fasta_text = fasta_file.read().decode() if fasta_file else None
-        pdb_text   = pdb_file.read().decode()   if pdb_file   else None
+        try:
+            fasta_text = fasta_file.read().decode() if fasta_file else None
+            pdb_text   = pdb_file.read().decode()   if pdb_file   else None
 
-        tasks: dict = {}
-        if fasta_text:
-            tasks["InterProScan"] = (run_interproscan, fasta_text)
-            tasks["BLASTp"]       = (run_blast,        fasta_text)
-            tasks["Phobius"]      = (run_phobius,       fasta_text)
-            tasks["HMMER"]        = (run_hmmer,         fasta_text)
-        if pdb_text:
-            tasks["FoldSeek"]     = (run_foldseek,      pdb_text)
+            tasks: dict = {}
+            if fasta_text:
+                tasks["InterProScan"] = (run_interproscan, fasta_text)
+                tasks["BLASTp"]       = (run_blast,        fasta_text)
+                tasks["Phobius"]      = (run_phobius,       fasta_text)
+                tasks["HMMER"]        = (run_hmmer,         fasta_text)
+            if pdb_text:
+                tasks["FoldSeek"]     = (run_foldseek,      pdb_text)
 
-        st.session_state["active_tools"] = list(tasks.keys())
+            n_tasks = len(tasks)
+            st.session_state["active_tools"] = list(tasks.keys())
 
-        results: dict = {}
-        _pipeline_start = time.time()
-        print(f"[PIPELINE] Starting {len(tasks)} tools: {list(tasks.keys())}", flush=True)
-        with st.spinner(f"Running {len(tasks)} tools in parallel — typically 8–12 min…"):
-            with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-                futures = {pool.submit(fn, arg): name for name, (fn, arg) in tasks.items()}
-                for future in as_completed(futures):
-                    name = futures[future]
-                    elapsed = round(time.time() - _pipeline_start, 1)
+            results: dict = {}
+            _pipeline_start = time.time()
+            print(f"[PIPELINE] Starting {n_tasks} tools sequentially: {list(tasks.keys())}", flush=True)
+
+            # Run sequentially — avoids OOM and thread contention on free-tier cloud.
+            # Each tool's status is streamed live to the UI via st.status().
+            with st.status(
+                f"Running {n_tasks} tool{'s' if n_tasks != 1 else ''} — this takes 8–15 minutes…",
+                expanded=True,
+            ) as _status_box:
+                for idx, (name, (fn, arg)) in enumerate(tasks.items(), 1):
+                    st.write(f"⏳  [{idx}/{n_tasks}]  **{name}** — running…")
+                    print(f"[PIPELINE] Starting {name}", flush=True)
+                    _t0 = time.time()
                     try:
-                        data = future.result()
+                        data = fn(arg)
                         results[name] = {"ok": True, "data": data}
-                        # Log hit counts for BLAST and HMMER to confirm data is real
-                        if name == "BLASTp":
-                            try:
-                                _hits = (data.get("BlastOutput2", [{}])[0]
-                                         .get("report", {}).get("results", {})
-                                         .get("search", {}).get("hits", []))
-                                print(f"[PIPELINE] {name} completed at {elapsed}s — {len(_hits)} hits", flush=True)
-                            except Exception:
-                                print(f"[PIPELINE] {name} completed at {elapsed}s — (could not count hits)", flush=True)
-                        elif name == "HMMER":
-                            _rows = sum(1 for ln in (data or "").splitlines()
-                                        if ln.strip() and not ln.startswith("#")
-                                        and not ln.startswith(" "))
-                            print(f"[PIPELINE] {name} completed at {elapsed}s — ~{_rows} result lines", flush=True)
-                        else:
-                            print(f"[PIPELINE] {name} completed at {elapsed}s — ok", flush=True)
-                    except Exception as exc:
-                        results[name] = {"ok": False, "error": str(exc)}
-                        print(f"[PIPELINE] {name} FAILED at {elapsed}s — {exc}", flush=True)
+                        _elapsed = round(time.time() - _t0, 1)
+                        st.write(f"✅  [{idx}/{n_tasks}]  **{name}** — done in {_elapsed}s")
+                        print(f"[PIPELINE] {name} done in {_elapsed}s", flush=True)
+                    except Exception as _exc:
+                        results[name] = {"ok": False, "error": str(_exc)}
+                        _elapsed = round(time.time() - _t0, 1)
+                        st.write(f"❌  [{idx}/{n_tasks}]  **{name}** — failed: {_exc}")
+                        print(f"[PIPELINE] {name} FAILED in {_elapsed}s — {_exc}", flush=True)
 
-        print(f"[PIPELINE] All tools done in {round(time.time()-_pipeline_start,1)}s. "
-              f"ok={[k for k,v in results.items() if v['ok']]} "
-              f"failed={[k for k,v in results.items() if not v['ok']]}", flush=True)
-        st.session_state["results"]    = results
-        st.session_state["fasta_text"] = fasta_text
-        st.session_state["pdb_text"]   = pdb_text
+                _total   = round(time.time() - _pipeline_start, 1)
+                _n_ok    = sum(1 for r in results.values() if r["ok"])
+                _all_ok  = _n_ok == n_tasks
+                _status_box.update(
+                    label=(f"{'All' if _all_ok else f'{_n_ok}/{n_tasks}'} tools completed"
+                           f" — {_total}s total"),
+                    state="complete" if _all_ok else "error",
+                )
+                print(f"[PIPELINE] All done in {_total}s — "
+                      f"ok={[k for k,v in results.items() if v['ok']]} "
+                      f"failed={[k for k,v in results.items() if not v['ok']]}", flush=True)
+
+            st.session_state["results"]    = results
+            st.session_state["fasta_text"] = fasta_text
+            st.session_state["pdb_text"]   = pdb_text
+
+        except Exception as _pipeline_crash:
+            import traceback as _tb
+            st.error(f"Pipeline crashed unexpectedly: {_pipeline_crash}")
+            st.code(_tb.format_exc())
+            print(f"[PIPELINE] CRASH: {_pipeline_crash}", flush=True)
 
     # Status list — reads session_state so it updates after each run
     _res    = st.session_state.get("results",      {})

@@ -2,4 +2,5 @@
 headless = true
 enableCORS = false
 enableXsrfProtection = false
-scriptRunTimeoutSeconds = 1800
+scriptRunTimeoutSeconds = 3600
+maxMessageSize = 200
