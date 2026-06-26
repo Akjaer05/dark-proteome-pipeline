@@ -1310,17 +1310,76 @@ _BARREL_ACCESSIONS = {"PS51208", "SSF103515", "PF00291"}
 # Accessions that positively identify autotransporter passenger (β-helix) domain
 _AT_ACCESSIONS = {"PF20696", "PF27415", "PF22399", "PS51208", "PF00291"}
 
-# BLAST description keywords indicating autotransporter architecture
+# BLAST keywords for Type Va autotransporters (fha/FHA moved to _FHA_BLAST_KEYWORDS)
 _AT_BLAST_KEYWORDS = [
-    "biga", "autotransporter", "fha", "filamentous haemagglutinin",
-    "aida", "trimeric autotransporter", "type v secretion",
+    "biga", "autotransporter", "aida", "trimeric autotransporter", "type v secretion",
     "pertactin", "intimin", "adhesin involved in",
 ]
 
+# RHS repeat solenoid — very large proteins, highly irregular spacing, N-terminal coiled-coil
+_RHS_ACCESSIONS = {"PF03917", "PF05593", "PF19434", "PF13796"}
+_RHS_BLAST_KEYWORDS = [
+    "rhs repeat", "rhs element", "type vi secretion",
+    "vgrg", "hemolysin-coregulated", "wxg100",
+]
+
+# FHA-type beta-helix — TPS/Two-Partner Secretion; filamentous hemagglutinin family
+_FHA_ACCESSIONS = {"PF02413", "PF13312", "PF15609"}
+_FHA_BLAST_KEYWORDS = [
+    "filamentous hemagglutinin", "filamentous haemagglutinin", "fha",
+    "two-partner secretion", "tps domain",
+]
+
+# FN3/Ig beta-sandwich — tandem immunoglobulin/fibronectin type III repeats
+_FN3_IG_ACCESSIONS = {
+    "PF00041", "PF00047", "PF07654", "PF13895", "PF13927", "PF09661", "PF13833",
+}
+_FN3_IG_BLAST_KEYWORDS = [
+    "fibronectin type iii", "fibronectin-type iii", "immunoglobulin-like",
+    "ig-like fold", "fn3 repeat",
+]
+
+# TPR solenoid — alpha-alpha superhelix; tetratricopeptide repeats; all-helix, no strands
+_TPR_ACCESSIONS = {
+    "PF00515", "PF07719", "PF07720", "PF07721", "PF13174",
+    "PF13181", "PF13428", "PF13432", "PF13512", "PF14559",
+}
+_TPR_BLAST_KEYWORDS = [
+    "tetratricopeptide", "tpr repeat", "sel1 repeat", "hal repeat",
+]
+
+
+def _blast_top_title(blast_data) -> str:
+    """Return the lowercase title of the top BLAST hit, or ''."""
+    if not blast_data:
+        return ""
+    for result in blast_data.get("BlastOutput2", []):
+        search = result.get("report", {}).get("results", {}).get("search", {})
+        hits   = search.get("hits", [])
+        if hits:
+            return hits[0].get("description", [{}])[0].get("title", "").lower()
+    return ""
+
+
+def _ipr_hits_for(ipr_data, accession_set: set) -> list:
+    """Return list of (acc, lib, name) for each InterProScan hit in accession_set."""
+    if not ipr_data:
+        return []
+    found, seen = [], set()
+    for res in ipr_data.get("results", []):
+        for match in res.get("matches", []):
+            sig = match.get("signature", {})
+            acc = sig.get("accession", "")
+            if acc in accession_set and acc not in seen:
+                seen.add(acc)
+                name = sig.get("name", "") or sig.get("description", "")
+                lib  = sig.get("signatureLibraryRelease", {}).get("library", "")
+                found.append((acc, lib, name))
+    return found
+
 
 def _find_barrel_cutoff(ipr_data) -> tuple:
-    """Return (cutoff_residue, hit_label) where cutoff_residue is the start of
-    the C-terminal β-barrel domain, or (0, None) if not found."""
+    """Return (cutoff_residue, hit_label) for the earliest C-terminal β-barrel hit."""
     if not ipr_data:
         return 0, None
     cutoff, hit_label = None, None
@@ -1341,86 +1400,226 @@ def _find_barrel_cutoff(ipr_data) -> tuple:
 
 def _score_autotransporter(ipr_data, blast_data, seq: str,
                             passenger_gap_sd: float) -> tuple:
-    """Return (score, [evidence strings]) for the Autotransporter β-helix fold."""
+    """Return (score, evidence_list) for the Autotransporter β-helix fold."""
     score, hits = 0, []
-
-    # InterProScan: each matching accession adds 25 pts (max 100)
-    if ipr_data:
-        seen: set = set()
-        for res in ipr_data.get("results", []):
-            for match in res.get("matches", []):
-                sig = match.get("signature", {})
-                acc = sig.get("accession", "")
-                if acc in _AT_ACCESSIONS and acc not in seen:
-                    score = min(100, score + 25)
-                    seen.add(acc)
-                    name = sig.get("name", "") or sig.get("description", "")
-                    lib  = sig.get("signatureLibraryRelease", {}).get("library", "")
-                    hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
-
-    # BLAST top hit: first matching keyword adds 15 pts
-    if blast_data:
-        top_title = ""
-        for result in blast_data.get("BlastOutput2", []):
-            search = result.get("report", {}).get("results", {}).get("search", {})
-            blast_hits = search.get("hits", [])
-            if blast_hits:
-                top_title = (blast_hits[0].get("description", [{}])[0]
-                             .get("title", "").lower())
-                break
-        for kw in _AT_BLAST_KEYWORDS:
-            if kw in top_title:
-                score = min(100, score + 15)
-                hits.append(f"BLAST top hit contains '{kw}'")
-                break
-
-    # C-terminal Phe — BAM complex recognition signal for β-barrel secretion
+    for acc, lib, name in _ipr_hits_for(ipr_data, _AT_ACCESSIONS):
+        score = min(100, score + 25)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+    top = _blast_top_title(blast_data)
+    for kw in _AT_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 15)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
     if seq and seq.rstrip()[-1].upper() == "F":
         score = min(100, score + 10)
         hits.append("C-terminal Phe (BAM complex recognition signal)")
-
-    # Regular passenger domain strand spacing adds 15 pts
     if 0 < passenger_gap_sd < 8:
         score = min(100, score + 15)
-        hits.append(f"Passenger strand spacing SD {passenger_gap_sd:.1f} < 8 (regular β-helix rungs)")
+        hits.append(f"Passenger strand SD {passenger_gap_sd:.1f} < 8 (regular β-helix rungs)")
+    return min(100, score), hits
 
-    return score, hits
+
+def _score_rhs(ipr_data, blast_data, seq: str, gap_sd: float,
+               parallel_pct: int, antiparallel_pct: int,
+               first_strand_start: int) -> tuple:
+    """Return (score, evidence_list) for the RHS repeat solenoid fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _RHS_ACCESSIONS):
+        score = min(100, score + 30)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 60:
+            break
+    if seq and len(seq) > 1500:
+        score = min(100, score + 20)
+        hits.append(f"Large protein ({len(seq)} aa > 1500 aa RHS threshold)")
+    if gap_sd > 20:
+        score = min(100, score + 15)
+        hits.append(f"Highly irregular strand spacing (SD={gap_sd:.1f} > 20)")
+    if parallel_pct < 60 and antiparallel_pct < 60:
+        score = min(100, score + 10)
+        hits.append(f"Mixed strand orientation ({parallel_pct}% par, {antiparallel_pct}% antipar)")
+    if first_strand_start > 200:
+        score = min(100, score + 10)
+        hits.append(f"N-terminal non-strand region (first strand at residue {first_strand_start})")
+    top = _blast_top_title(blast_data)
+    for kw in _RHS_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 15)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_fha(ipr_data, blast_data, seq: str, gap_sd: float) -> tuple:
+    """Return (score, evidence_list) for the FHA-type β-helix (TPS) fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _FHA_ACCESSIONS):
+        score = min(100, score + 25)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 75:
+            break
+    if seq and len(seq) > 2000:
+        score = min(100, score + 15)
+        hits.append(f"Very long protein ({len(seq)} aa > 2000 aa FHA threshold)")
+    if 0 < gap_sd < 8:
+        score = min(100, score + 10)
+        hits.append(f"Semi-regular strand spacing (SD={gap_sd:.1f} < 8, like AT β-helix)")
+    top = _blast_top_title(blast_data)
+    for kw in _FHA_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 15)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_fn3_ig(ipr_data, blast_data, n_strands: int,
+                  antiparallel_pct: int) -> tuple:
+    """Return (score, evidence_list) for the FN3/Ig tandem-repeat sandwich fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _FN3_IG_ACCESSIONS)[:4]:
+        score = min(100, score + 20)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+    if n_strands >= 6:
+        score = min(100, score + 10)
+        hits.append(f"{n_strands} beta strands — consistent with tandem Ig/FN3 domains")
+    if antiparallel_pct > 50:
+        score = min(100, score + 10)
+        hits.append(f"{antiparallel_pct}% antiparallel — Ig/FN3 beta-sheets are antiparallel")
+    top = _blast_top_title(blast_data)
+    for kw in _FN3_IG_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 10)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_tpr(ipr_data, blast_data, ss_pct) -> tuple:
+    """Return (score, evidence_list) for the TPR alpha-alpha solenoid fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _TPR_ACCESSIONS):
+        score = min(100, score + 25)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 75:
+            break
+    if ss_pct and ss_pct.get("H", 0) > 40:
+        score = min(100, score + 15)
+        hits.append(f"Predominantly helical ({ss_pct['H']}% helix by DSSP)")
+    if ss_pct and ss_pct.get("E", 100) < 10:
+        score = min(100, score + 10)
+        hits.append(f"Very low beta content ({ss_pct.get('E', 0)}% strand by DSSP)")
+    top = _blast_top_title(blast_data)
+    for kw in _TPR_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 15)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
 
 
 def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str,
                             dssp_available: bool = True,
-                            ipr_data=None, blast_data=None) -> dict:
+                            ipr_data=None, blast_data=None, ss_pct=None) -> dict:
     rtx_hits = _rtx_matches(seq) if seq else []
     n_total  = len(strands)
+
+    # TPR detection works without beta strands (all-helix architecture)
+    tpr_score, tpr_hits = _score_tpr(ipr_data, blast_data, ss_pct)
+
     if n_total < 2:
+        if tpr_score >= 25:
+            plddt_mean = round(sum(plddt) / len(plddt), 1) if plddt else 0
+            fold_scores = {
+                "Beta-solenoid":           0,
+                "RHS solenoid":            0,
+                "Autotransporter β-helix": 0,
+                "FHA β-helix":             0,
+                "FN3/Ig sandwich":         0,
+                "Beta-barrel":             0,
+                "TPR solenoid":            tpr_score,
+            }
+            criteria = {
+                "All-helix architecture":    (ss_pct.get("E", 100) < 10) if ss_pct else True,
+                "TPR domain hits":           tpr_score >= 25,
+                "High pLDDT in repeat core": plddt_mean > 70,
+                "No/few beta strands":       n_total == 0,
+            }
+            reasoning = [
+                f"DSSP found {n_total} beta strand(s) — consistent with an all-helix protein.",
+                f"SS composition: {ss_pct or 'unavailable'}. TPR solenoids are alpha-alpha "
+                f"superhelices with no beta strands.",
+                f"TPR solenoid score {tpr_score}/100: "
+                + ("; ".join(tpr_hits) or "no specific evidence") + ".",
+                f"Best fold match: TPR solenoid ({tpr_score}/100).",
+            ]
+            return {
+                "available":          True,
+                "n_strands":          n_total,
+                "n_passenger":        0,
+                "strands":            [],
+                "barrel_cutoff":      0,
+                "barrel_hit":         None,
+                "lengths":            [],
+                "mean_len":           0.0,
+                "gaps":               [],
+                "mean_gap":           0.0,
+                "gap_sd":             0.0,
+                "angles":             [],
+                "mean_angle":         0.0,
+                "angle_sd":           0.0,
+                "parallel_pct":       0,
+                "antiparallel_pct":   0,
+                "rtx_hits":           rtx_hits,
+                "rtx_on_strands":     False,
+                "strand_plddt_mean":  plddt_mean,
+                "solenoid_score":     0,
+                "rhs_score":          0,
+                "at_score":           0,
+                "fha_score":          0,
+                "fn3_ig_score":       0,
+                "sandwich_score":     0,
+                "barrel_score":       0,
+                "tpr_score":          tpr_score,
+                "at_hits":            [],
+                "rhs_hits":           [],
+                "fha_hits":           [],
+                "fn3_ig_hits":        [],
+                "tpr_hits":           tpr_hits,
+                "best_fold":          "TPR solenoid",
+                "criteria":           criteria,
+                "reasoning":          reasoning,
+                "fold_scores":        fold_scores,
+                "dssp_available":     dssp_available,
+            }
         return {"available": False, "n_strands": n_total,
                 "dssp_available": dssp_available, "rtx_hits": rtx_hits}
 
-    # ── Problem 1: exclude C-terminal β-barrel translocator ──────────────────
+    # ── Exclude C-terminal β-barrel translocator from passenger geometry ──────
     barrel_cutoff, barrel_hit = _find_barrel_cutoff(ipr_data)
     if barrel_cutoff > 0:
-        work_strands  = [(s, e) for s, e in strands if s < barrel_cutoff]
-        work_ca       = ca_coords[:barrel_cutoff - 1] if ca_coords else []
-        work_plddt    = plddt[:barrel_cutoff - 1]     if plddt     else plddt
+        work_strands = [(s, e) for s, e in strands if s < barrel_cutoff]
+        work_ca      = ca_coords[:barrel_cutoff - 1] if ca_coords else []
+        work_plddt   = plddt[:barrel_cutoff - 1]     if plddt     else plddt
     else:
-        work_strands  = strands
-        work_ca       = ca_coords
-        work_plddt    = plddt
+        work_strands = strands
+        work_ca      = ca_coords
+        work_plddt   = plddt
 
-    # Fall back to all strands if exclusion leaves fewer than 2
     if len(work_strands) < 2:
         work_strands, work_ca, work_plddt = strands, ca_coords, plddt
         barrel_cutoff, barrel_hit = 0, None
 
-    n = len(work_strands)
-    lengths  = [e - s + 1 for s, e in work_strands]
-    mean_len = sum(lengths) / n
-    gaps     = [work_strands[i+1][0] - work_strands[i][1] - 1 for i in range(n - 1)]
-    mean_gap = sum(gaps) / len(gaps) if gaps else 0
-    gap_sd   = (math.sqrt(sum((g - mean_gap)**2 for g in gaps) / len(gaps))
-                if len(gaps) > 1 else 0)
+    n                  = len(work_strands)
+    first_strand_start = work_strands[0][0] if work_strands else 0
+    lengths            = [e - s + 1 for s, e in work_strands]
+    mean_len           = sum(lengths) / n
+    gaps               = [work_strands[i+1][0] - work_strands[i][1] - 1 for i in range(n - 1)]
+    mean_gap           = sum(gaps) / len(gaps) if gaps else 0
+    gap_sd             = (math.sqrt(sum((g - mean_gap)**2 for g in gaps) / len(gaps))
+                          if len(gaps) > 1 else 0)
 
-    # Strand direction vectors (passenger domain only)
     def _norm(v):
         m = math.sqrt(sum(x*x for x in v))
         return tuple(x/m for x in v) if m > 0 else (0.0, 0.0, 0.0)
@@ -1447,32 +1646,31 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
     parallel_pct     = round(sum(1 for a in angles if a < 45)  / len(angles) * 100) if angles else 0
     antiparallel_pct = round(sum(1 for a in angles if a > 135) / len(angles) * 100) if angles else 0
 
-    # RTX proximity check (passenger strands only)
     rtx_on_strands = any(
         not (re < s - 3 or rs > e + 3)
         for rs, re in rtx_hits
         for s, e in work_strands
     )
 
-    # pLDDT over passenger strand residues
     strand_pl = [work_plddt[i]
                  for s, e in work_strands
                  for i in range(s - 1, min(e, len(work_plddt)))]
     strand_plddt_mean = round(sum(strand_pl) / len(strand_pl), 1) if strand_pl else 0
 
-    # ── Problem 2: Autotransporter β-helix score ──────────────────────────────
-    at_score, at_hits = _score_autotransporter(ipr_data, blast_data, seq, gap_sd)
+    # ── Score every fold type ─────────────────────────────────────────────────
+    at_score,    at_hits    = _score_autotransporter(ipr_data, blast_data, seq, gap_sd)
+    rhs_score,   rhs_hits   = _score_rhs(ipr_data, blast_data, seq, gap_sd,
+                                          parallel_pct, antiparallel_pct, first_strand_start)
+    fha_score,   fha_hits   = _score_fha(ipr_data, blast_data, seq, gap_sd)
+    fn3_ig_score, fn3_ig_hits = _score_fn3_ig(ipr_data, blast_data, n_total, antiparallel_pct)
 
-    # ── Fold scores (0–100) ───────────────────────────────────────────────────
-    # Beta-solenoid (RTX-type)
     sol  = min(30, n * 4)
     sol += max(0, int(30 - gap_sd * 6))
     sol += round(max(parallel_pct, antiparallel_pct) * 0.2) if angles else 0
-    sol += 15 if rtx_on_strands else 0   # RTX only boosts solenoid, never penalises AT
+    sol += 15 if rtx_on_strands else 0
     sol += 5  if strand_plddt_mean > 70 else 0
     sol  = min(100, max(0, sol))
 
-    # Beta-sandwich
     sand  = 25 if 4 <= n <= 14 else 0
     sand += min(25, int(mean_len * 2))
     sand += int(antiparallel_pct * 0.2)
@@ -1480,9 +1678,7 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
     sand += 5  if strand_plddt_mean > 70 else 0
     sand  = min(100, max(0, sand))
 
-    # Beta-barrel (uses full strand count, not just passenger)
-    n_all   = n_total
-    barrel  = 30 if 8 <= n_all <= 24 else 0
+    barrel  = 30 if 8 <= n_total <= 24 else 0
     barrel += int(antiparallel_pct * 0.25)
     barrel += 20 if 1 <= mean_gap <= 5 else 0
     barrel += max(0, int(20 - gap_sd * 3))
@@ -1491,83 +1687,109 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
 
     fold_scores = {
         "Beta-solenoid":           sol,
+        "RHS solenoid":            rhs_score,
         "Autotransporter β-helix": at_score,
-        "Beta-sandwich":           sand,
+        "FHA β-helix":             fha_score,
+        "FN3/Ig sandwich":         fn3_ig_score,
         "Beta-barrel":             barrel,
+        "TPR solenoid":            tpr_score,
     }
     best_fold = max(fold_scores, key=fold_scores.get)
 
-    # ── Problem 3: context-sensitive criteria ─────────────────────────────────
-    # RTX criterion only shown when the protein is a plausible RTX solenoid.
-    # For autotransporters its absence is neutral — replaced by AT evidence card.
-    is_at_context = (best_fold == "Autotransporter β-helix") or (at_score > sol)
+    # ── Context-sensitive criteria cards ─────────────────────────────────────
     criteria: dict = {
         "Regular strand spacing":    gap_sd < 4.0,
         "Parallel orientation":      parallel_pct > 60,
         "High pLDDT in repeat core": strand_plddt_mean > 70,
     }
-    if is_at_context:
+    if best_fold == "FN3/Ig sandwich":
+        criteria["Multiple Ig/FN3 domain hits"] = fn3_ig_score >= 20
+    elif best_fold == "FHA β-helix":
+        criteria["TPS/ESPR domain hits"] = fha_score >= 25
+    elif best_fold == "RHS solenoid":
+        criteria["RHS repeat domain hits"] = rhs_score >= 25
+    elif best_fold == "Autotransporter β-helix" or (at_score > sol and at_score >= rhs_score):
         criteria["Autotransporter domain hits"] = at_score >= 25
+    elif best_fold == "TPR solenoid":
+        criteria["TPR domain hits"] = tpr_score >= 25
     else:
         criteria["RTX sequence motif"] = rtx_on_strands
 
     # ── Reasoning chain ───────────────────────────────────────────────────────
     spacing_q = ("regular" if gap_sd < 4 else
-                 "moderately regular" if gap_sd < 8 else "irregular")
+                 "moderately regular" if gap_sd < 8 else
+                 "highly irregular" if gap_sd > 20 else "irregular")
     orient_q  = (f"{parallel_pct}% parallel — solenoid-consistent" if parallel_pct > 60
-                 else f"{antiparallel_pct}% antiparallel — barrel/sandwich-like" if antiparallel_pct > 60
+                 else f"{antiparallel_pct}% antiparallel — sandwich/barrel-like" if antiparallel_pct > 60
                  else "mixed orientation")
     reasoning: list = []
 
     if barrel_cutoff > 0:
         reasoning.append(
             f"β-barrel translocator domain detected ({barrel_hit}) starting at residue "
-            f"{barrel_cutoff}. Residues {barrel_cutoff}–end excluded from strand geometry "
+            f"{barrel_cutoff}. Residues {barrel_cutoff}–end excluded from passenger geometry "
             f"analysis; only the passenger domain (res 1–{barrel_cutoff - 1}) is used for "
             f"spacing and crossing-angle statistics."
         )
-
     reasoning.append(
         f"DSSP found {n_total} beta strands total; {n} in the passenger domain, "
         f"average {round(mean_len, 1)} aa (range {min(lengths)}–{max(lengths)} aa)."
     )
     reasoning.append(
-        f"Passenger domain inter-strand spacing: mean {round(mean_gap, 1)} residues, "
-        f"SD {round(gap_sd, 1)} — {spacing_q}. "
-        f"Right-handed β-helix (autotransporter) typically shows SD < 8; "
-        f"RTX solenoid shows SD < 4."
+        f"Inter-strand spacing: mean {round(mean_gap, 1)} residues, SD {round(gap_sd, 1)} "
+        f"— {spacing_q}. "
+        f"RTX solenoid: SD < 4; AT/FHA β-helix: SD < 8; RHS solenoid: SD > 20."
     )
     reasoning.append(
         f"Consecutive strand crossing angle: mean {round(mean_angle, 0):.0f}°, "
         f"SD {round(angle_sd, 0):.0f}° — {orient_q}."
     )
-    if at_hits:
+    if first_strand_start > 200:
         reasoning.append(
-            f"Autotransporter β-helix evidence ({at_score}/100): "
-            + "; ".join(at_hits) + "."
+            f"First strand at residue {first_strand_start} — substantial N-terminal "
+            f"non-strand region, consistent with RHS coiled-coil or WXG100 secretion domain."
         )
+    if at_hits:
+        reasoning.append(f"Autotransporter β-helix evidence ({at_score}/100): "
+                         + "; ".join(at_hits) + ".")
+    if rhs_hits:
+        reasoning.append(f"RHS solenoid evidence ({rhs_score}/100): "
+                         + "; ".join(rhs_hits) + ".")
+    if fha_hits:
+        reasoning.append(f"FHA β-helix evidence ({fha_score}/100): "
+                         + "; ".join(fha_hits) + ".")
+    if fn3_ig_hits:
+        reasoning.append(f"FN3/Ig sandwich evidence ({fn3_ig_score}/100): "
+                         + "; ".join(fn3_ig_hits) + ".")
+    if tpr_hits:
+        reasoning.append(f"TPR solenoid evidence ({tpr_score}/100): "
+                         + "; ".join(tpr_hits) + ".")
     if rtx_on_strands:
         reasoning.append(
             "RTX nonapeptide (GGXGXDXUX) detected at strand edges — "
             "characteristic of RTX-family beta-solenoid toxins."
         )
     else:
-        reasoning.append(
-            "No RTX motif (GGXGXDXUX) found near strand edges — consistent with "
-            "non-RTX solenoid class (autotransporter β-helix does not use this motif)."
-        )
+        reasoning.append("No RTX motif (GGXGXDXUX) found near strand edges.")
     reasoning.append(
         f"Mean pLDDT over passenger strand residues: {strand_plddt_mean} "
         f"({'high confidence' if strand_plddt_mean > 70 else 'moderate/low'})."
     )
+    _conclusion = {
+        "Beta-solenoid":           "Evidence is consistent with an RTX-type parallel beta-solenoid.",
+        "RHS solenoid":            "Evidence is consistent with an RHS-type solenoid with N-terminal coiled-coil/WXG100 domain.",
+        "Autotransporter β-helix": "Evidence is consistent with an autotransporter right-handed β-helix (Type Va).",
+        "FHA β-helix":             "Evidence is consistent with an FHA-type β-helix secreted by Two-Partner Secretion (TPS).",
+        "FN3/Ig sandwich":         "Evidence is consistent with tandem FN3/Ig-like beta-sandwich repeat domains.",
+        "Beta-barrel":             "Evidence is consistent with a transmembrane beta-barrel.",
+        "TPR solenoid":            "Evidence is consistent with a TPR-type alpha-alpha solenoid (no beta strands).",
+    }
+    _score_summary = " · ".join(f"{k}: {v}" for k, v in fold_scores.items())
     reasoning.append(
-        f"Best fold match: {best_fold} "
-        f"(solenoid {sol} · autotransporter {at_score} · sandwich {sand} · barrel {barrel}, all /100). "
-        + ("Evidence is consistent with an autotransporter right-handed β-helix."
-           if best_fold == "Autotransporter β-helix" and at_score >= 50
-           else "Evidence is consistent with an RTX beta-solenoid architecture."
-           if best_fold == "Beta-solenoid" and sol >= 50
-           else "Structural homology search (FoldSeek) is recommended to confirm assignment.")
+        f"Best fold match: {best_fold} ({fold_scores[best_fold]}/100). "
+        f"All scores — {_score_summary}. "
+        + _conclusion.get(best_fold,
+            "FoldSeek structural homology search recommended to confirm assignment.")
     )
 
     return {
@@ -1591,14 +1813,23 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
         "rtx_on_strands":     rtx_on_strands,
         "strand_plddt_mean":  strand_plddt_mean,
         "solenoid_score":     sol,
+        "rhs_score":          rhs_score,
         "at_score":           at_score,
-        "at_hits":            at_hits,
+        "fha_score":          fha_score,
+        "fn3_ig_score":       fn3_ig_score,
         "sandwich_score":     sand,
         "barrel_score":       barrel,
+        "tpr_score":          tpr_score,
+        "at_hits":            at_hits,
+        "rhs_hits":           rhs_hits,
+        "fha_hits":           fha_hits,
+        "fn3_ig_hits":        fn3_ig_hits,
+        "tpr_hits":           tpr_hits,
         "best_fold":          best_fold,
         "criteria":           criteria,
         "reasoning":          reasoning,
         "fold_scores":        fold_scores,
+        "dssp_available":     dssp_available,
     }
 
 
@@ -1901,7 +2132,8 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
     sol_analysis = _analyze_beta_solenoid(strands, ca_coords, plddt, seq,
                                           dssp_available=dssp_ok,
                                           ipr_data=_ipr_data,
-                                          blast_data=_blast_data)
+                                          blast_data=_blast_data,
+                                          ss_pct=ss)
     seq_len      = len(seq) or len(plddt) or 1
 
     col_v, col_a = st.columns([5, 4])
