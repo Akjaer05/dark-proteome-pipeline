@@ -1260,7 +1260,7 @@ def _features_html(scores: list, seq: str, phobius_text) -> str:
     )
 
 
-# ── Beta-solenoid detector ────────────────────────────────────────────────────
+# ── Fold Type Classifier ──────────────────────────────────────────────────────
 
 def _run_dssp_strands(pdb_text: str):
     """Return (strand_list, pct_dict) or ([], None).
@@ -1341,11 +1341,66 @@ _FN3_IG_BLAST_KEYWORDS = [
 
 # TPR solenoid — alpha-alpha superhelix; tetratricopeptide repeats; all-helix, no strands
 _TPR_ACCESSIONS = {
-    "PF00515", "PF07719", "PF07720", "PF07721", "PF13174",
-    "PF13181", "PF13428", "PF13432", "PF13512", "PF14559",
+    "PF00515", "PF07719", "PF07720", "PF07721",
+    "PF13428", "PF13432", "PF13512", "PF14559",
 }
 _TPR_BLAST_KEYWORDS = [
     "tetratricopeptide", "tpr repeat", "sel1 repeat", "hal repeat",
+]
+
+# TIM barrel — 8-stranded parallel beta-barrel with alternating outer helices; 200–450 aa
+_TIM_ACCESSIONS = {"SSF51351", "G3DSA:3.20.20.70"}
+_TIM_BLAST_KEYWORDS = [
+    "tim barrel", "triosephosphate isomerase", "aldolase", "enolase",
+    "xylose isomerase", "glucoamylase", "phosphotriesterase",
+]
+
+# Rossmann fold — parallel beta-sheet alternating with helices; nucleotide/cofactor binding
+_ROSSMANN_ACCESSIONS = {"SSF52374", "SSF51735", "G3DSA:3.40.50.720"}
+_ROSSMANN_BLAST_KEYWORDS = [
+    "rossmann", "nad-binding", "nad binding", "nadh", "nadph",
+    "nucleotide-binding", "dehydrogenase", "reductase", "oxidoreductase",
+]
+
+# OB fold — small oligonucleotide/oligosaccharide-binding 5-stranded beta-barrel
+_OB_ACCESSIONS = {"SSF50249", "PF01336"}
+_OB_BLAST_KEYWORDS = [
+    "oligonucleotide binding", "ob fold", "ob-fold",
+    "cold shock", "ribosomal protein s1",
+]
+
+# Beta-propeller — radially symmetric WD40/Kelch/YWTD repeat; many short antiparallel strands
+_PROPELLER_ACCESSIONS = {"PF00400", "PF01344", "PF01966", "SSF50978"}
+_PROPELLER_BLAST_KEYWORDS = [
+    "wd40", "wd repeat", "wd-40", "kelch repeat", "kelch-type",
+    "beta-propeller", "ywtd",
+]
+
+# Lectin/jelly-roll beta-sandwich — ConA-type; carbohydrate-binding antiparallel beta-sheet
+_LECTIN_ACCESSIONS = {"SSF49899", "PF00139", "PF00652", "PF14200"}
+_LECTIN_BLAST_KEYWORDS = [
+    "lectin", "carbohydrate-binding", "concanavalin", "galectin",
+    "jelly roll", "jelly-roll", "sugar-binding",
+]
+
+# Coiled-coil — heptad-repeat helical bundle; >70% helix, <5% strand
+_COIL_ACCESSIONS = {"PF05765", "SSF47370"}
+_COIL_BLAST_KEYWORDS = [
+    "coiled-coil", "coiled coil", "leucine zipper", "coil domain",
+]
+
+# Alpha-solenoid (HEAT/ARM) — stacked helical hairpin repeats; large, high helix content
+_HEAT_ACCESSIONS = {"PF02985", "PF00514", "PF13190", "PF19012"}
+_HEAT_BLAST_KEYWORDS = [
+    "heat repeat", "heat-repeat", "armadillo repeat", "arm repeat",
+    "importin", "exportin", "beta-catenin",
+]
+
+# Calycin/lipocalin — small 8-stranded antiparallel beta-barrel cup; lipid/ligand carrier
+_CALYCIN_ACCESSIONS = {"PF00061", "SSF50814"}
+_CALYCIN_BLAST_KEYWORDS = [
+    "lipocalin", "fatty acid-binding", "fatty acid binding",
+    "retinol-binding", "calycin", "carrier protein",
 ]
 
 
@@ -1519,79 +1574,273 @@ def _score_tpr(ipr_data, blast_data, ss_pct) -> tuple:
     return min(100, score), hits
 
 
-def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str,
-                            dssp_available: bool = True,
-                            ipr_data=None, blast_data=None, ss_pct=None) -> dict:
+def _score_tim_barrel(ipr_data, blast_data, seq, n_strands,
+                      parallel_pct, mean_gap, ss_pct) -> tuple:
+    """Return (score, evidence_list) for the TIM barrel fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _TIM_ACCESSIONS):
+        score = min(100, score + 35)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 70:
+            break
+    if 6 <= n_strands <= 10:
+        score = min(100, score + 20)
+        hits.append(f"{n_strands} beta strands — TIM barrel has 8 ±2 parallel strands")
+    if parallel_pct > 60:
+        score = min(100, score + 15)
+        hits.append(f"{parallel_pct}% parallel — TIM barrel beta-strands are parallel")
+    if 10 <= mean_gap <= 45:
+        score = min(100, score + 10)
+        hits.append(f"Mean inter-strand gap {mean_gap:.0f} aa — consistent with helix-containing loop")
+    if seq and 200 <= len(seq) <= 450:
+        score = min(100, score + 10)
+        hits.append(f"Protein size {len(seq)} aa — within TIM barrel range (200–450 aa)")
+    if ss_pct and ss_pct.get("H", 0) > 20:
+        score = min(100, score + 5)
+        hits.append(f"Significant helix content ({ss_pct['H']}%) — TIM barrel has 8 outer helices")
+    top = _blast_top_title(blast_data)
+    for kw in _TIM_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 15)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_rossmann(ipr_data, blast_data, ss_pct, parallel_pct) -> tuple:
+    """Return (score, evidence_list) for the Rossmann fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _ROSSMANN_ACCESSIONS):
+        score = min(100, score + 35)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 70:
+            break
+    if ss_pct and ss_pct.get("H", 0) > 25 and ss_pct.get("E", 0) > 15:
+        score = min(100, score + 15)
+        hits.append(f"Mixed α/β (H={ss_pct['H']}%, E={ss_pct['E']}%) — Rossmann fold is α/β")
+    if parallel_pct > 50:
+        score = min(100, score + 10)
+        hits.append(f"{parallel_pct}% parallel strands — Rossmann fold has parallel beta-sheet")
+    top = _blast_top_title(blast_data)
+    for kw in _ROSSMANN_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 20)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_ob_fold(ipr_data, blast_data, seq, n_strands, ss_pct) -> tuple:
+    """Return (score, evidence_list) for the OB fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _OB_ACCESSIONS):
+        score = min(100, score + 40)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 80:
+            break
+    if seq and len(seq) < 200:
+        score = min(100, score + 20)
+        hits.append(f"Small protein ({len(seq)} aa < 200 aa — OB folds are small domains)")
+    if ss_pct and ss_pct.get("E", 0) > 30:
+        score = min(100, score + 10)
+        hits.append(f"High beta content ({ss_pct['E']}% strand) — OB fold is predominantly beta")
+    if 4 <= n_strands <= 7:
+        score = min(100, score + 10)
+        hits.append(f"{n_strands} beta strands — OB fold typically has 5 beta-strands")
+    top = _blast_top_title(blast_data)
+    for kw in _OB_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 20)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_beta_propeller(ipr_data, blast_data, n_strands, ss_pct) -> tuple:
+    """Return (score, evidence_list) for the beta-propeller fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _PROPELLER_ACCESSIONS):
+        score = min(100, score + 30)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 60:
+            break
+    if n_strands >= 16:
+        score = min(100, score + 20)
+        hits.append(f"{n_strands} beta strands — propellers have many short blades (≥16 for 4-blade)")
+    if ss_pct and ss_pct.get("E", 0) > 25 and ss_pct.get("H", 0) < 20:
+        score = min(100, score + 15)
+        hits.append(f"Predominantly beta (E={ss_pct['E']}%, H={ss_pct['H']}%)")
+    top = _blast_top_title(blast_data)
+    for kw in _PROPELLER_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 20)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_lectin(ipr_data, blast_data, ss_pct, antiparallel_pct) -> tuple:
+    """Return (score, evidence_list) for the lectin/jelly-roll beta-sandwich fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _LECTIN_ACCESSIONS):
+        score = min(100, score + 35)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 70:
+            break
+    if antiparallel_pct > 50:
+        score = min(100, score + 15)
+        hits.append(f"{antiparallel_pct}% antiparallel — lectin jelly-roll is antiparallel beta")
+    if ss_pct and ss_pct.get("E", 0) > 25 and ss_pct.get("H", 0) < 20:
+        score = min(100, score + 10)
+        hits.append(f"Predominantly beta (E={ss_pct['E']}%, H={ss_pct['H']}%)")
+    top = _blast_top_title(blast_data)
+    for kw in _LECTIN_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 20)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_coiled_coil(ipr_data, blast_data, ss_pct) -> tuple:
+    """Return (score, evidence_list) for the coiled-coil fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _COIL_ACCESSIONS):
+        score = min(100, score + 35)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 70:
+            break
+    if ss_pct and ss_pct.get("H", 0) > 70:
+        score = min(100, score + 25)
+        hits.append(f"Predominantly helical ({ss_pct['H']}% helix > 70% coiled-coil threshold)")
+    if ss_pct and ss_pct.get("E", 100) < 5:
+        score = min(100, score + 15)
+        hits.append(f"Negligible beta content ({ss_pct.get('E', 0)}% strand by DSSP)")
+    top = _blast_top_title(blast_data)
+    for kw in _COIL_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 20)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_heat_arm(ipr_data, blast_data, seq, ss_pct) -> tuple:
+    """Return (score, evidence_list) for the HEAT/ARM alpha-solenoid fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _HEAT_ACCESSIONS):
+        score = min(100, score + 30)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 60:
+            break
+    if ss_pct and ss_pct.get("H", 0) > 60:
+        score = min(100, score + 20)
+        hits.append(f"Predominantly helical ({ss_pct['H']}% helix > 60% HEAT/ARM threshold)")
+    if seq and len(seq) > 500:
+        score = min(100, score + 15)
+        hits.append(f"Large protein ({len(seq)} aa > 500 aa — HEAT/ARM solenoids are typically large)")
+    if ss_pct and ss_pct.get("E", 100) < 15:
+        score = min(100, score + 10)
+        hits.append(f"Low beta content ({ss_pct.get('E', 0)}% strand) — HEAT/ARM have few strands")
+    top = _blast_top_title(blast_data)
+    for kw in _HEAT_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 20)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _score_calycin(ipr_data, blast_data, seq, n_strands, antiparallel_pct) -> tuple:
+    """Return (score, evidence_list) for the calycin/lipocalin beta-barrel cup fold."""
+    score, hits = 0, []
+    for acc, lib, name in _ipr_hits_for(ipr_data, _CALYCIN_ACCESSIONS):
+        score = min(100, score + 45)
+        hits.append(f"{acc} ({lib}: {name})" if name else f"{acc} ({lib})")
+        if score >= 90:
+            break
+    if seq and len(seq) < 200:
+        score = min(100, score + 15)
+        hits.append(f"Small protein ({len(seq)} aa < 200 aa — lipocalins are compact domains)")
+    if antiparallel_pct > 60:
+        score = min(100, score + 10)
+        hits.append(f"{antiparallel_pct}% antiparallel — lipocalin barrel is antiparallel")
+    if 6 <= n_strands <= 10:
+        score = min(100, score + 10)
+        hits.append(f"{n_strands} beta strands — lipocalin has 8 antiparallel strands")
+    top = _blast_top_title(blast_data)
+    for kw in _CALYCIN_BLAST_KEYWORDS:
+        if kw in top:
+            score = min(100, score + 20)
+            hits.append(f"BLAST top hit: '{kw}'")
+            break
+    return min(100, score), hits
+
+
+def _analyze_fold_type(strands: list, ca_coords: list, plddt: list, seq: str,
+                       dssp_available: bool = True,
+                       ipr_data=None, blast_data=None, ss_pct=None) -> dict:
     rtx_hits = _rtx_matches(seq) if seq else []
     n_total  = len(strands)
 
-    # TPR detection works without beta strands (all-helix architecture)
-    tpr_score, tpr_hits = _score_tpr(ipr_data, blast_data, ss_pct)
+    # Helix-dominant folds can be scored without any beta strands
+    tpr_score,  tpr_hits  = _score_tpr(ipr_data, blast_data, ss_pct)
+    coil_score, coil_hits = _score_coiled_coil(ipr_data, blast_data, ss_pct)
+    heat_score, heat_hits = _score_heat_arm(ipr_data, blast_data, seq, ss_pct)
 
     if n_total < 2:
-        if tpr_score >= 25:
+        helix_scores = {
+            "TPR solenoid":    tpr_score,
+            "Coiled-coil":     coil_score,
+            "HEAT/ARM solenoid": heat_score,
+        }
+        best_helix       = max(helix_scores, key=helix_scores.get)
+        best_helix_score = helix_scores[best_helix]
+
+        if best_helix_score >= 25:
             plddt_mean = round(sum(plddt) / len(plddt), 1) if plddt else 0
-            fold_scores = {
-                "Beta-solenoid":           0,
-                "RHS solenoid":            0,
-                "Autotransporter β-helix": 0,
-                "FHA β-helix":             0,
-                "FN3/Ig sandwich":         0,
-                "Beta-barrel":             0,
-                "TPR solenoid":            tpr_score,
-            }
-            criteria = {
+            _zero_fs: dict = {k: 0 for k in [
+                "Beta-solenoid", "RHS solenoid", "Autotransporter β-helix", "FHA β-helix",
+                "FN3/Ig sandwich", "Lectin/jelly-roll", "Beta-barrel", "Beta-propeller",
+                "TIM barrel", "OB fold", "Calycin/lipocalin", "Rossmann fold",
+                "Coiled-coil", "HEAT/ARM solenoid", "TPR solenoid",
+            ]}
+            _zero_fs.update({"Coiled-coil": coil_score,
+                              "HEAT/ARM solenoid": heat_score,
+                              "TPR solenoid": tpr_score})
+            _best_hits = {"TPR solenoid": tpr_hits,
+                          "Coiled-coil": coil_hits,
+                          "HEAT/ARM solenoid": heat_hits}[best_helix]
+            _criteria = {
                 "All-helix architecture":    (ss_pct.get("E", 100) < 10) if ss_pct else True,
-                "TPR domain hits":           tpr_score >= 25,
+                f"{best_helix} domain hits": best_helix_score >= 25,
                 "High pLDDT in repeat core": plddt_mean > 70,
                 "No/few beta strands":       n_total == 0,
             }
-            reasoning = [
-                f"DSSP found {n_total} beta strand(s) — consistent with an all-helix protein.",
-                f"SS composition: {ss_pct or 'unavailable'}. TPR solenoids are alpha-alpha "
-                f"superhelices with no beta strands.",
-                f"TPR solenoid score {tpr_score}/100: "
-                + ("; ".join(tpr_hits) or "no specific evidence") + ".",
-                f"Best fold match: TPR solenoid ({tpr_score}/100).",
+            _conclusion = {
+                "TPR solenoid":      "Evidence is consistent with a TPR-type alpha-alpha superhelix.",
+                "Coiled-coil":       "Evidence is consistent with a heptad-repeat coiled-coil bundle.",
+                "HEAT/ARM solenoid": "Evidence is consistent with a HEAT/ARM stacked-helix solenoid.",
+            }
+            _reasoning = [
+                f"DSSP found {n_total} beta strand(s) — consistent with an all-helix architecture.",
+                f"SS composition: {ss_pct or 'unavailable'}.",
+                f"{best_helix} score {best_helix_score}/100: "
+                + ("; ".join(_best_hits) or "no specific evidence") + ".",
+                f"Best fold match: {best_helix} ({best_helix_score}/100). "
+                + _conclusion.get(best_helix, "FoldSeek recommended to confirm."),
             ]
             return {
-                "available":          True,
-                "n_strands":          n_total,
-                "n_passenger":        0,
-                "strands":            [],
-                "barrel_cutoff":      0,
-                "barrel_hit":         None,
-                "lengths":            [],
-                "mean_len":           0.0,
-                "gaps":               [],
-                "mean_gap":           0.0,
-                "gap_sd":             0.0,
-                "angles":             [],
-                "mean_angle":         0.0,
-                "angle_sd":           0.0,
-                "parallel_pct":       0,
-                "antiparallel_pct":   0,
-                "rtx_hits":           rtx_hits,
-                "rtx_on_strands":     False,
-                "strand_plddt_mean":  plddt_mean,
-                "solenoid_score":     0,
-                "rhs_score":          0,
-                "at_score":           0,
-                "fha_score":          0,
-                "fn3_ig_score":       0,
-                "sandwich_score":     0,
-                "barrel_score":       0,
-                "tpr_score":          tpr_score,
-                "at_hits":            [],
-                "rhs_hits":           [],
-                "fha_hits":           [],
-                "fn3_ig_hits":        [],
-                "tpr_hits":           tpr_hits,
-                "best_fold":          "TPR solenoid",
-                "criteria":           criteria,
-                "reasoning":          reasoning,
-                "fold_scores":        fold_scores,
-                "dssp_available":     dssp_available,
+                "available": True, "n_strands": n_total, "n_passenger": 0,
+                "strands": [], "barrel_cutoff": 0, "barrel_hit": None,
+                "lengths": [], "mean_len": 0.0, "gaps": [], "mean_gap": 0.0,
+                "gap_sd": 0.0, "angles": [], "mean_angle": 0.0, "angle_sd": 0.0,
+                "parallel_pct": 0, "antiparallel_pct": 0,
+                "rtx_hits": rtx_hits, "rtx_on_strands": False,
+                "strand_plddt_mean": plddt_mean,
+                "best_fold": best_helix, "criteria": _criteria,
+                "reasoning": _reasoning, "fold_scores": _zero_fs,
+                "dssp_available": dssp_available,
             }
         return {"available": False, "n_strands": n_total,
                 "dssp_available": dssp_available, "rtx_hits": rtx_hits}
@@ -1603,9 +1852,7 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
         work_ca      = ca_coords[:barrel_cutoff - 1] if ca_coords else []
         work_plddt   = plddt[:barrel_cutoff - 1]     if plddt     else plddt
     else:
-        work_strands = strands
-        work_ca      = ca_coords
-        work_plddt   = plddt
+        work_strands, work_ca, work_plddt = strands, ca_coords, plddt
 
     if len(work_strands) < 2:
         work_strands, work_ca, work_plddt = strands, ca_coords, plddt
@@ -1657,12 +1904,19 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
                  for i in range(s - 1, min(e, len(work_plddt)))]
     strand_plddt_mean = round(sum(strand_pl) / len(strand_pl), 1) if strand_pl else 0
 
-    # ── Score every fold type ─────────────────────────────────────────────────
-    at_score,    at_hits    = _score_autotransporter(ipr_data, blast_data, seq, gap_sd)
-    rhs_score,   rhs_hits   = _score_rhs(ipr_data, blast_data, seq, gap_sd,
-                                          parallel_pct, antiparallel_pct, first_strand_start)
-    fha_score,   fha_hits   = _score_fha(ipr_data, blast_data, seq, gap_sd)
+    # ── Score all 15 fold types ───────────────────────────────────────────────
+    at_score,   at_hits   = _score_autotransporter(ipr_data, blast_data, seq, gap_sd)
+    rhs_score,  rhs_hits  = _score_rhs(ipr_data, blast_data, seq, gap_sd,
+                                        parallel_pct, antiparallel_pct, first_strand_start)
+    fha_score,  fha_hits  = _score_fha(ipr_data, blast_data, seq, gap_sd)
     fn3_ig_score, fn3_ig_hits = _score_fn3_ig(ipr_data, blast_data, n_total, antiparallel_pct)
+    tim_score,  tim_hits  = _score_tim_barrel(ipr_data, blast_data, seq, n_total,
+                                               parallel_pct, mean_gap, ss_pct)
+    ros_score,  ros_hits  = _score_rossmann(ipr_data, blast_data, ss_pct, parallel_pct)
+    ob_score,   ob_hits   = _score_ob_fold(ipr_data, blast_data, seq, n_total, ss_pct)
+    prop_score, prop_hits = _score_beta_propeller(ipr_data, blast_data, n_total, ss_pct)
+    lec_score,  lec_hits  = _score_lectin(ipr_data, blast_data, ss_pct, antiparallel_pct)
+    cal_score,  cal_hits  = _score_calycin(ipr_data, blast_data, seq, n_total, antiparallel_pct)
 
     sol  = min(30, n * 4)
     sol += max(0, int(30 - gap_sd * 6))
@@ -1670,13 +1924,6 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
     sol += 15 if rtx_on_strands else 0
     sol += 5  if strand_plddt_mean > 70 else 0
     sol  = min(100, max(0, sol))
-
-    sand  = 25 if 4 <= n <= 14 else 0
-    sand += min(25, int(mean_len * 2))
-    sand += int(antiparallel_pct * 0.2)
-    sand += 15 if gap_sd > 3 else 0
-    sand += 5  if strand_plddt_mean > 70 else 0
-    sand  = min(100, max(0, sand))
 
     barrel  = 30 if 8 <= n_total <= 24 else 0
     barrel += int(antiparallel_pct * 0.25)
@@ -1691,105 +1938,195 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
         "Autotransporter β-helix": at_score,
         "FHA β-helix":             fha_score,
         "FN3/Ig sandwich":         fn3_ig_score,
+        "Lectin/jelly-roll":       lec_score,
         "Beta-barrel":             barrel,
+        "Beta-propeller":          prop_score,
+        "TIM barrel":              tim_score,
+        "OB fold":                 ob_score,
+        "Calycin/lipocalin":       cal_score,
+        "Rossmann fold":           ros_score,
+        "Coiled-coil":             coil_score,
+        "HEAT/ARM solenoid":       heat_score,
         "TPR solenoid":            tpr_score,
     }
     best_fold = max(fold_scores, key=fold_scores.get)
 
-    # ── Context-sensitive criteria cards ─────────────────────────────────────
-    criteria: dict = {
+    # ── Context-sensitive criteria (4 cards, tailored to best fold) ──────────
+    _crit_defaults: dict = {
         "Regular strand spacing":    gap_sd < 4.0,
         "Parallel orientation":      parallel_pct > 60,
         "High pLDDT in repeat core": strand_plddt_mean > 70,
+        "RTX sequence motif":        rtx_on_strands,
     }
-    if best_fold == "FN3/Ig sandwich":
-        criteria["Multiple Ig/FN3 domain hits"] = fn3_ig_score >= 20
-    elif best_fold == "FHA β-helix":
-        criteria["TPS/ESPR domain hits"] = fha_score >= 25
-    elif best_fold == "RHS solenoid":
-        criteria["RHS repeat domain hits"] = rhs_score >= 25
-    elif best_fold == "Autotransporter β-helix" or (at_score > sol and at_score >= rhs_score):
-        criteria["Autotransporter domain hits"] = at_score >= 25
-    elif best_fold == "TPR solenoid":
-        criteria["TPR domain hits"] = tpr_score >= 25
-    else:
-        criteria["RTX sequence motif"] = rtx_on_strands
+    _crit_overrides: dict = {
+        "Beta-solenoid": {**_crit_defaults},
+        "RHS solenoid": {
+            "RHS repeat domain hits":       rhs_score >= 25,
+            "Large protein (>1500 aa)":     bool(seq and len(seq) > 1500),
+            "Highly irregular spacing":     gap_sd > 20,
+            "N-terminal non-strand region": first_strand_start > 200,
+        },
+        "Autotransporter β-helix": {
+            "Regular strand spacing":       gap_sd < 4.0,
+            "Parallel orientation":         parallel_pct > 60,
+            "High pLDDT in repeat core":    strand_plddt_mean > 70,
+            "Autotransporter domain hits":  at_score >= 25,
+        },
+        "FHA β-helix": {
+            "TPS/ESPR domain hits":         fha_score >= 25,
+            "Very long protein (>2000 aa)": bool(seq and len(seq) > 2000),
+            "Semi-regular spacing (SD<8)":  0 < gap_sd < 8,
+            "High pLDDT in repeat core":    strand_plddt_mean > 70,
+        },
+        "FN3/Ig sandwich": {
+            "Multiple Ig/FN3 domain hits":  fn3_ig_score >= 20,
+            "Antiparallel orientation":     antiparallel_pct > 50,
+            "High pLDDT in repeat core":    strand_plddt_mean > 70,
+            "≥6 beta strands":              n_total >= 6,
+        },
+        "Lectin/jelly-roll": {
+            "Lectin/ConA domain hits":      lec_score >= 25,
+            "Antiparallel orientation":     antiparallel_pct > 50,
+            "Predominantly beta":           bool(ss_pct and ss_pct.get("E", 0) > 25),
+            "High pLDDT":                   strand_plddt_mean > 70,
+        },
+        "Beta-barrel": {
+            "8–24 beta strands":            8 <= n_total <= 24,
+            "Antiparallel orientation":     antiparallel_pct > 50,
+            "Short strands (5–12 aa)":      5 <= mean_len <= 12,
+            "Tight inter-strand gaps":      1 <= mean_gap <= 5,
+        },
+        "Beta-propeller": {
+            "WD40/Kelch domain hits":       prop_score >= 20,
+            "≥16 beta strands":             n_total >= 16,
+            "Predominantly beta":           bool(ss_pct and ss_pct.get("E", 0) > 25),
+            "Low helix content":            bool(ss_pct and ss_pct.get("H", 0) < 20),
+        },
+        "TIM barrel": {
+            "TIM barrel IPR hits":          tim_score >= 20,
+            "8 ±2 parallel strands":        6 <= n_total <= 10,
+            "Helix-containing gaps (10–45 aa)": 10 <= mean_gap <= 45,
+            "Protein size 200–450 aa":      bool(seq and 200 <= len(seq) <= 450),
+        },
+        "OB fold": {
+            "OB fold IPR hits":             ob_score >= 30,
+            "Small protein (<200 aa)":      bool(seq and len(seq) < 200),
+            "Predominantly beta":           bool(ss_pct and ss_pct.get("E", 0) > 30),
+            "4–7 beta strands":             4 <= n_total <= 7,
+        },
+        "Calycin/lipocalin": {
+            "Lipocalin IPR hits (PF00061)": cal_score >= 30,
+            "Small protein (<200 aa)":      bool(seq and len(seq) < 200),
+            "Antiparallel orientation":     antiparallel_pct > 60,
+            "6–10 beta strands":            6 <= n_total <= 10,
+        },
+        "Rossmann fold": {
+            "Rossmann/NAD-binding IPR hits": ros_score >= 25,
+            "Parallel beta-sheet":          parallel_pct > 50,
+            "Mixed α/β content":            bool(ss_pct and ss_pct.get("H", 0) > 25
+                                                  and ss_pct.get("E", 0) > 15),
+            "Nucleotide-binding keyword":   any(kw in _blast_top_title(blast_data)
+                                                for kw in _ROSSMANN_BLAST_KEYWORDS),
+        },
+        "Coiled-coil": {
+            ">70% helix by DSSP":           bool(ss_pct and ss_pct.get("H", 0) > 70),
+            "<5% strand by DSSP":           bool(ss_pct and ss_pct.get("E", 100) < 5),
+            "Coiled-coil IPR hits":         coil_score >= 25,
+            "High pLDDT":                   strand_plddt_mean > 70,
+        },
+        "HEAT/ARM solenoid": {
+            "HEAT/ARM domain hits":         heat_score >= 25,
+            ">60% helix by DSSP":           bool(ss_pct and ss_pct.get("H", 0) > 60),
+            "Large protein (>500 aa)":      bool(seq and len(seq) > 500),
+            "Low beta content (<15%)":      bool(ss_pct and ss_pct.get("E", 100) < 15),
+        },
+        "TPR solenoid": {
+            "TPR domain hits":              tpr_score >= 25,
+            ">40% helix by DSSP":           bool(ss_pct and ss_pct.get("H", 0) > 40),
+            "<10% strand by DSSP":          bool(ss_pct and ss_pct.get("E", 100) < 10),
+            "High pLDDT in repeat core":    strand_plddt_mean > 70,
+        },
+    }
+    criteria = _crit_overrides.get(best_fold, _crit_defaults)
 
     # ── Reasoning chain ───────────────────────────────────────────────────────
     spacing_q = ("regular" if gap_sd < 4 else
                  "moderately regular" if gap_sd < 8 else
                  "highly irregular" if gap_sd > 20 else "irregular")
-    orient_q  = (f"{parallel_pct}% parallel — solenoid-consistent" if parallel_pct > 60
-                 else f"{antiparallel_pct}% antiparallel — sandwich/barrel-like" if antiparallel_pct > 60
+    orient_q  = (f"{parallel_pct}% parallel" if parallel_pct > 60
+                 else f"{antiparallel_pct}% antiparallel" if antiparallel_pct > 60
                  else "mixed orientation")
     reasoning: list = []
 
     if barrel_cutoff > 0:
         reasoning.append(
-            f"β-barrel translocator domain detected ({barrel_hit}) starting at residue "
-            f"{barrel_cutoff}. Residues {barrel_cutoff}–end excluded from passenger geometry "
-            f"analysis; only the passenger domain (res 1–{barrel_cutoff - 1}) is used for "
-            f"spacing and crossing-angle statistics."
+            f"β-barrel translocator detected ({barrel_hit}) at residue {barrel_cutoff}. "
+            f"Passenger domain (res 1–{barrel_cutoff - 1}) used for geometry statistics."
+        )
+    if ss_pct:
+        reasoning.append(
+            f"Global SS composition: {ss_pct.get('H', 0)}% helix, "
+            f"{ss_pct.get('E', 0)}% strand, {ss_pct.get('C', 0)}% coil."
         )
     reasoning.append(
-        f"DSSP found {n_total} beta strands total; {n} in the passenger domain, "
-        f"average {round(mean_len, 1)} aa (range {min(lengths)}–{max(lengths)} aa)."
+        f"DSSP: {n_total} beta strands ({n} in passenger domain), "
+        f"mean {round(mean_len, 1)} aa (range {min(lengths)}–{max(lengths)} aa)."
     )
     reasoning.append(
-        f"Inter-strand spacing: mean {round(mean_gap, 1)} residues, SD {round(gap_sd, 1)} "
-        f"— {spacing_q}. "
-        f"RTX solenoid: SD < 4; AT/FHA β-helix: SD < 8; RHS solenoid: SD > 20."
-    )
-    reasoning.append(
-        f"Consecutive strand crossing angle: mean {round(mean_angle, 0):.0f}°, "
-        f"SD {round(angle_sd, 0):.0f}° — {orient_q}."
+        f"Inter-strand spacing: mean {round(mean_gap, 1)} aa, SD {round(gap_sd, 1)} — {spacing_q}. "
+        f"Orientation: {orient_q}."
     )
     if first_strand_start > 200:
         reasoning.append(
             f"First strand at residue {first_strand_start} — substantial N-terminal "
-            f"non-strand region, consistent with RHS coiled-coil or WXG100 secretion domain."
+            f"non-strand region (RHS coiled-coil/WXG100, signal domain, or unstructured linker)."
         )
-    if at_hits:
-        reasoning.append(f"Autotransporter β-helix evidence ({at_score}/100): "
-                         + "; ".join(at_hits) + ".")
-    if rhs_hits:
-        reasoning.append(f"RHS solenoid evidence ({rhs_score}/100): "
-                         + "; ".join(rhs_hits) + ".")
-    if fha_hits:
-        reasoning.append(f"FHA β-helix evidence ({fha_score}/100): "
-                         + "; ".join(fha_hits) + ".")
-    if fn3_ig_hits:
-        reasoning.append(f"FN3/Ig sandwich evidence ({fn3_ig_score}/100): "
-                         + "; ".join(fn3_ig_hits) + ".")
-    if tpr_hits:
-        reasoning.append(f"TPR solenoid evidence ({tpr_score}/100): "
-                         + "; ".join(tpr_hits) + ".")
+    # Evidence lines only for folds with non-zero scores
+    _evidence_map = [
+        ("Autotransporter β-helix", at_score,   at_hits),
+        ("RHS solenoid",            rhs_score,  rhs_hits),
+        ("FHA β-helix",             fha_score,  fha_hits),
+        ("FN3/Ig sandwich",         fn3_ig_score, fn3_ig_hits),
+        ("Lectin/jelly-roll",       lec_score,  lec_hits),
+        ("TIM barrel",              tim_score,  tim_hits),
+        ("Rossmann fold",           ros_score,  ros_hits),
+        ("OB fold",                 ob_score,   ob_hits),
+        ("Beta-propeller",          prop_score, prop_hits),
+        ("Calycin/lipocalin",       cal_score,  cal_hits),
+        ("Coiled-coil",             coil_score, coil_hits),
+        ("HEAT/ARM solenoid",       heat_score, heat_hits),
+        ("TPR solenoid",            tpr_score,  tpr_hits),
+    ]
+    for fname, fscore, fhits in _evidence_map:
+        if fhits:
+            reasoning.append(f"{fname} evidence ({fscore}/100): " + "; ".join(fhits) + ".")
     if rtx_on_strands:
-        reasoning.append(
-            "RTX nonapeptide (GGXGXDXUX) detected at strand edges — "
-            "characteristic of RTX-family beta-solenoid toxins."
-        )
-    else:
-        reasoning.append("No RTX motif (GGXGXDXUX) found near strand edges.")
+        reasoning.append("RTX nonapeptide (GGXGXDXUX) detected at strand edges.")
     reasoning.append(
-        f"Mean pLDDT over passenger strand residues: {strand_plddt_mean} "
-        f"({'high confidence' if strand_plddt_mean > 70 else 'moderate/low'})."
+        f"Mean pLDDT over strand residues: {strand_plddt_mean} "
+        f"({'high' if strand_plddt_mean > 70 else 'moderate/low'})."
     )
-    _conclusion = {
-        "Beta-solenoid":           "Evidence is consistent with an RTX-type parallel beta-solenoid.",
-        "RHS solenoid":            "Evidence is consistent with an RHS-type solenoid with N-terminal coiled-coil/WXG100 domain.",
-        "Autotransporter β-helix": "Evidence is consistent with an autotransporter right-handed β-helix (Type Va).",
-        "FHA β-helix":             "Evidence is consistent with an FHA-type β-helix secreted by Two-Partner Secretion (TPS).",
-        "FN3/Ig sandwich":         "Evidence is consistent with tandem FN3/Ig-like beta-sandwich repeat domains.",
-        "Beta-barrel":             "Evidence is consistent with a transmembrane beta-barrel.",
-        "TPR solenoid":            "Evidence is consistent with a TPR-type alpha-alpha solenoid (no beta strands).",
+    _conclusion_map = {
+        "Beta-solenoid":           "RTX-type parallel beta-solenoid.",
+        "RHS solenoid":            "RHS-type solenoid with N-terminal coiled-coil/WXG100 domain.",
+        "Autotransporter β-helix": "Autotransporter right-handed β-helix (Type Va).",
+        "FHA β-helix":             "FHA-type β-helix; Two-Partner Secretion (TPS).",
+        "FN3/Ig sandwich":         "Tandem FN3/Ig-like beta-sandwich repeat domains.",
+        "Lectin/jelly-roll":       "Lectin/jelly-roll ConA-type antiparallel beta-sandwich.",
+        "Beta-barrel":             "Transmembrane beta-barrel.",
+        "Beta-propeller":          "Radially symmetric WD40/Kelch-type beta-propeller.",
+        "TIM barrel":              "8-stranded parallel TIM barrel (beta/alpha)8 fold.",
+        "OB fold":                 "OB-fold oligonucleotide/oligosaccharide-binding barrel.",
+        "Calycin/lipocalin":       "Calycin/lipocalin 8-stranded antiparallel beta-barrel cup.",
+        "Rossmann fold":           "Rossmann-fold nucleotide/cofactor-binding alpha/beta domain.",
+        "Coiled-coil":             "Heptad-repeat coiled-coil helical bundle.",
+        "HEAT/ARM solenoid":       "HEAT/ARM stacked-helix alpha-solenoid.",
+        "TPR solenoid":            "TPR-type alpha-alpha superhelix with no beta strands.",
     }
-    _score_summary = " · ".join(f"{k}: {v}" for k, v in fold_scores.items())
+    best_sc = fold_scores[best_fold]
     reasoning.append(
-        f"Best fold match: {best_fold} ({fold_scores[best_fold]}/100). "
-        f"All scores — {_score_summary}. "
-        + _conclusion.get(best_fold,
-            "FoldSeek structural homology search recommended to confirm assignment.")
+        f"Best fold match: {best_fold} ({best_sc}/100). "
+        + _conclusion_map.get(best_fold, "FoldSeek recommended to confirm assignment.")
     )
 
     return {
@@ -1812,19 +2149,6 @@ def _analyze_beta_solenoid(strands: list, ca_coords: list, plddt: list, seq: str
         "rtx_hits":           rtx_hits,
         "rtx_on_strands":     rtx_on_strands,
         "strand_plddt_mean":  strand_plddt_mean,
-        "solenoid_score":     sol,
-        "rhs_score":          rhs_score,
-        "at_score":           at_score,
-        "fha_score":          fha_score,
-        "fn3_ig_score":       fn3_ig_score,
-        "sandwich_score":     sand,
-        "barrel_score":       barrel,
-        "tpr_score":          tpr_score,
-        "at_hits":            at_hits,
-        "rhs_hits":           rhs_hits,
-        "fha_hits":           fha_hits,
-        "fn3_ig_hits":        fn3_ig_hits,
-        "tpr_hits":           tpr_hits,
         "best_fold":          best_fold,
         "criteria":           criteria,
         "reasoning":          reasoning,
@@ -2019,7 +2343,7 @@ def _reasoning_chain_html(reasoning: list) -> str:
     )
 
 
-def _beta_solenoid_html(analysis: dict, seq_len: int) -> str:
+def _fold_classifier_html(analysis: dict, seq_len: int) -> str:
     if not analysis.get("available"):
         n        = analysis.get("n_strands", 0)
         dssp_ok  = analysis.get("dssp_available", True)
@@ -2061,7 +2385,7 @@ def _beta_solenoid_html(analysis: dict, seq_len: int) -> str:
         return (
             '<div style="margin-top:16px;">'
             '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
-            'text-transform:uppercase;margin:0 0 8px;">Beta-solenoid Detector</p>'
+            'text-transform:uppercase;margin:0 0 8px;">Fold Type Classifier</p>'
             f'<p style="color:#64748b;font-size:11.5px;margin:0 0 2px;">{_esc(msg)}</p>'
             f'{rtx_html}</div>'
         )
@@ -2076,7 +2400,7 @@ def _beta_solenoid_html(analysis: dict, seq_len: int) -> str:
         '<div style="display:flex;align-items:center;justify-content:space-between;'
         'flex-wrap:wrap;gap:6px;margin-bottom:10px;">'
         '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
-        'text-transform:uppercase;margin:0;">Beta-solenoid Detector</p>'
+        'text-transform:uppercase;margin:0;">Fold Type Classifier</p>'
         f'<span style="background:{conf_col}22;border:1px solid {conf_col}55;'
         f'border-radius:999px;padding:2px 9px;font-size:10px;color:{conf_col};font-weight:600;">'
         f'{conf_lbl} · Best: {_esc(best)}</span></div>'
@@ -2129,11 +2453,11 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
     _blast_data = (_results.get("BLASTp", {}) or {}).get("data")
 
     # Beta-solenoid analysis
-    sol_analysis = _analyze_beta_solenoid(strands, ca_coords, plddt, seq,
-                                          dssp_available=dssp_ok,
-                                          ipr_data=_ipr_data,
-                                          blast_data=_blast_data,
-                                          ss_pct=ss)
+    sol_analysis = _analyze_fold_type(strands, ca_coords, plddt, seq,
+                                     dssp_available=dssp_ok,
+                                     ipr_data=_ipr_data,
+                                     blast_data=_blast_data,
+                                     ss_pct=ss)
     seq_len      = len(seq) or len(plddt) or 1
 
     col_v, col_a = st.columns([5, 4])
@@ -2142,8 +2466,7 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
         components.html(_3dmol_html(pdb_text, height=440), height=494, scrolling=False)
         if plddt:
             st.markdown(_plddt_bar_html(plddt), unsafe_allow_html=True)
-        # Beta-solenoid detector section (below pLDDT bar)
-        st.markdown(_beta_solenoid_html(sol_analysis, seq_len), unsafe_allow_html=True)
+        st.markdown(_fold_classifier_html(sol_analysis, seq_len), unsafe_allow_html=True)
 
     with col_a:
         if seq_props:
