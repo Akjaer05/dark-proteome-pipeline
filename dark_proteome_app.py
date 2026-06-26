@@ -678,12 +678,40 @@ def show_interproscan(data: dict) -> None:
 
 
 def show_blast(data: dict) -> None:
+    parse_err = None
+    hits = []
     try:
         bo2  = data["BlastOutput2"]
         bo2  = bo2[0] if isinstance(bo2, list) else bo2
         hits = bo2["report"]["results"]["search"]["hits"]
-    except (KeyError, IndexError, TypeError):
-        hits = []
+    except (KeyError, IndexError, TypeError) as e:
+        parse_err = e
+
+    if parse_err is not None or not hits:
+        # Visible red diagnostic box — always shown when 0 results
+        _diag_lines = []
+        if parse_err:
+            _diag_lines.append(f"Parse error: {parse_err}")
+        _bo2 = data.get("BlastOutput2", "KEY MISSING")
+        if isinstance(_bo2, list):
+            _diag_lines.append(f"BlastOutput2 list length: {len(_bo2)}")
+            if _bo2:
+                _diag_lines.append(f"First entry keys: {list(_bo2[0].keys()) if isinstance(_bo2[0], dict) else type(_bo2[0])}")
+        else:
+            _diag_lines.append(f"BlastOutput2 value: {_bo2!r}")
+        _diag_lines.append(f"Hit count: {len(hits)}")
+        st.error(
+            "BLASTp returned 0 hits.\n\n"
+            + "\n".join(_diag_lines)
+        )
+        with st.expander("Raw BLAST response (first 4000 chars)"):
+            try:
+                st.code(json.dumps(data, indent=2)[:4000], language="json")
+            except Exception:
+                st.code(str(data)[:4000])
+        if not hits:
+            return
+
     rows = []
     for hit in hits:
         desc      = (hit.get("description") or [{}])[0]
@@ -698,7 +726,7 @@ def show_blast(data: dict) -> None:
             "Bit score":   hsp.get("bit_score", ""),
         })
     df = pd.DataFrame(rows)
-    st.markdown(_cards(("Top hits", len(df), "nr database")), unsafe_allow_html=True)
+    st.markdown(_cards(("Top hits", len(df), "uniprotkb_bacteria")), unsafe_allow_html=True)
     st.markdown(_html_table(df), unsafe_allow_html=True)
 
 
@@ -723,9 +751,11 @@ def show_phobius(text: str) -> None:
 
 def show_hmmer(text: str) -> None:
     rows, in_hits, below = [], False, False
+    found_scores_section = False
     for line in text.splitlines():
         if "Scores for complete sequence" in line:
             in_hits = True
+            found_scores_section = True
             continue
         if not in_hits:
             continue
@@ -758,7 +788,23 @@ def show_hmmer(text: str) -> None:
             "Significant":  "Yes" if not below else "No",
         })
     df = pd.DataFrame(rows)
-    above = int((df["Significant"] == "Yes").sum()) if not df.empty else 0
+
+    if df.empty:
+        # Visible red diagnostic box — always shown when 0 domains
+        _lines = text.splitlines() if text else []
+        _diag  = (
+            f"Response length: {len(text)} chars, {len(_lines)} lines\n"
+            f"'Scores for complete sequence' section found: {found_scores_section}\n"
+            f"Rows parsed: 0"
+        )
+        if not text:
+            _diag = "HMMER returned an empty response (zero bytes)."
+        st.error(f"HMMER returned 0 Pfam domains.\n\n{_diag}")
+        with st.expander("Raw HMMER response (first 4000 chars)"):
+            st.code((text or "(empty)")[:4000])
+        return
+
+    above = int((df["Significant"] == "Yes").sum())
     st.markdown(_cards(
         ("Significant domains",            above,   "above inclusion threshold"),
         ("Total (incl. below threshold)",  len(df), None),
@@ -2428,17 +2474,11 @@ with col_right:
                 f'&#x2714;&ensp;{n_ok}/{n_total} tools completed</span></div>',
                 unsafe_allow_html=True,
             )
-            # Inline error banners for failed tools
+            # Inline error banners for failed tools — full error text, always visible
             for name in _active:
                 r = _res.get(name)
                 if r and not r["ok"]:
-                    st.markdown(
-                        f'<div style="background:rgba(239,68,68,0.05);'
-                        f'border:1px solid rgba(239,68,68,0.15);border-radius:6px;'
-                        f'padding:10px 14px;margin-bottom:8px;color:#ef4444;font-size:12px;">'
-                        f'<strong>{_esc(name)}</strong> — {_esc(r["error"])}</div>',
-                        unsafe_allow_html=True,
-                    )
+                    st.error(f"**{name} failed** — {r['error']}")
 
         # Build tab list: Structure → Domain Map → tool results
         finished        = [t for t in _active if _res.get(t, {}).get("ok")]
@@ -2470,11 +2510,20 @@ with col_right:
             for i, name in enumerate(finished):
                 with tabs[offset + i]:
                     data = _res[name]["data"]
-                    if   name == "InterProScan": show_interproscan(data)
-                    elif name == "BLASTp":       show_blast(data)
-                    elif name == "Phobius":      show_phobius(data)
-                    elif name == "HMMER":        show_hmmer(data)
-                    elif name == "FoldSeek":     show_foldseek(data)
+                    try:
+                        if   name == "InterProScan": show_interproscan(data)
+                        elif name == "BLASTp":       show_blast(data)
+                        elif name == "Phobius":      show_phobius(data)
+                        elif name == "HMMER":        show_hmmer(data)
+                        elif name == "FoldSeek":     show_foldseek(data)
+                    except Exception as _tab_exc:
+                        st.error(f"**{name} display error:** {_tab_exc}")
+                        with st.expander("Raw data (for debugging)"):
+                            try:
+                                st.code(json.dumps(data, indent=2)[:4000]
+                                        if isinstance(data, (dict, list)) else str(data)[:4000])
+                            except Exception:
+                                st.code(str(data)[:4000])
 
 # ── Debug panel (only visible when ?debug=1 is in the URL) ───────────────────
 
