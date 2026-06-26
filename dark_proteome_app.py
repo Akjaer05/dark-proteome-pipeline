@@ -458,12 +458,12 @@ def run_blast(sequence):
     if not jid:
         raise RuntimeError("BLASTp: no job ID in EBI response")
 
-    print(f"[BLAST] Submitted EBI job={jid}, waiting 10s before first poll")
-    time.sleep(10)
+    print(f"[BLAST] Submitted EBI job={jid}, waiting 30s before first poll")
+    time.sleep(30)
 
-    # POLLING — 720s total, 30s per request, 30s between polls
+    # POLLING — 1200s total budget, 30s between polls (EBI fair-use), 30s per request
     start    = time.time()
-    deadline = start + 720
+    deadline = start + 1200
     status   = "PENDING"
     poll_n   = 0
     while time.time() < deadline:
@@ -486,7 +486,7 @@ def run_blast(sequence):
 
     if status != "FINISHED":
         raise RuntimeError(
-            "BLASTp did not complete within 12 minutes — EBI queue may be busy. "
+            "BLASTp did not complete within 20 minutes — EBI queue may be busy. "
             "Try again later."
         )
 
@@ -2428,6 +2428,10 @@ with col_left:
             ) as _status_box:
                 for idx, (name, (fn, arg)) in enumerate(tasks.items(), 1):
                     st.write(f"⏳  [{idx}/{n_tasks}]  **{name}** — running…")
+                    if name == "BLASTp":
+                        st.info(
+                            "BLASTp can take 10–15 minutes from cloud servers — this is normal."
+                        )
                     print(f"[PIPELINE] Starting {name}", flush=True)
                     _t0 = time.time()
                     try:
