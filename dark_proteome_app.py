@@ -590,20 +590,61 @@ def run_foldseek(pdb_text):
     data = [("q", pdb_text), ("mode", "3diaa"), ("email", EMAIL)]
     for db in ["afdb50", "afdb-swissprot", "afdb-proteome", "BFVD"]:
         data.append(("database[]", db))
-    r = requests.post(f"{url}/ticket", data=data, timeout=60)
-    r.raise_for_status()
-    resp = r.json()
+
+    # Submission — retry up to 3 times on 503 (server overload)
+    resp = None
+    for attempt in range(3):
+        try:
+            r = requests.post(f"{url}/ticket", data=data, timeout=60)
+            if r.status_code == 503:
+                if attempt < 2:
+                    time.sleep(30)
+                    continue
+                r.raise_for_status()
+            r.raise_for_status()
+            resp = r.json()
+            break
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                time.sleep(30)
+            else:
+                raise RuntimeError("FoldSeek submission timed out after 3 attempts")
+    if resp is None:
+        raise RuntimeError("FoldSeek submission failed after 3 attempts")
     if resp.get("status") in ("RATELIMIT", "MAINTENANCE"):
         raise RuntimeError(f"FoldSeek server: {resp['status']}")
     ticket = resp["id"]
+
     while True:
-        s = requests.get(f"{url}/ticket/{ticket}", timeout=60).json().get("status", "UNKNOWN")
+        try:
+            s = requests.get(f"{url}/ticket/{ticket}", timeout=60).json().get("status", "UNKNOWN")
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 503:
+                time.sleep(30)
+                continue
+            raise
         if s in ("COMPLETE", "ERROR", "FAILED", "UNKNOWN"):
             break
         time.sleep(10)
     if s != "COMPLETE":
         raise RuntimeError(f"FoldSeek status: {s}")
-    r = requests.get(f"{url}/result/download/{ticket}", timeout=120)
+
+    # Result download — retry up to 3 times on 503
+    for attempt in range(3):
+        try:
+            r = requests.get(f"{url}/result/download/{ticket}", timeout=120)
+            if r.status_code == 503:
+                if attempt < 2:
+                    time.sleep(30)
+                    continue
+                r.raise_for_status()
+            r.raise_for_status()
+            break
+        except requests.exceptions.Timeout:
+            if attempt < 2:
+                time.sleep(30)
+            else:
+                raise RuntimeError("FoldSeek result download timed out after 3 attempts")
     r.raise_for_status()
     return r.content
 
@@ -789,18 +830,19 @@ def show_hmmer(text: str) -> None:
     df = pd.DataFrame(rows)
 
     if df.empty:
-        # Visible red diagnostic box — always shown when 0 domains
-        _lines = text.splitlines() if text else []
-        _diag  = (
-            f"Response length: {len(text)} chars, {len(_lines)} lines\n"
-            f"'Scores for complete sequence' section found: {found_scores_section}\n"
-            f"Rows parsed: 0"
-        )
         if not text:
-            _diag = "HMMER returned an empty response (zero bytes)."
-        st.error(f"HMMER returned 0 Pfam domains.\n\n{_diag}")
-        with st.expander("Raw HMMER response (first 4000 chars)"):
-            st.code((text or "(empty)")[:4000])
+            # Genuinely empty response — keep as error for debugging
+            st.error("HMMER returned an empty response (zero bytes).")
+            return
+        # 0 rows after parsing = valid "no hits" result (common for dark proteome proteins)
+        st.markdown(_cards(
+            ("Significant domains", 0, "above inclusion threshold"),
+            ("Total",               0, None),
+        ), unsafe_allow_html=True)
+        st.info(
+            "No Pfam domain matches found for this protein — this is common for "
+            "dark proteome proteins with no characterised family."
+        )
         return
 
     above = int((df["Significant"] == "Yes").sum())
