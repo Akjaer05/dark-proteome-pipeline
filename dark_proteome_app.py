@@ -199,8 +199,15 @@ html, body, .stApp,
     margin-top: 6px !important;
 }
 .stButton > button:hover:not(:disabled) {
-    box-shadow: 0 6px 22px rgba(59, 130, 246, 0.45) !important;
-    transform: translateY(-1px) !important;
+    box-shadow: 0 8px 28px rgba(59, 130, 246, 0.55) !important;
+    transform: translateY(-2px) scale(1.025) !important;
+}
+@keyframes dpp-btn-glow {
+    0%,100% { box-shadow: 0 4px 14px rgba(59,130,246,.25); }
+    50%      { box-shadow: 0 4px 26px rgba(59,130,246,.52); }
+}
+.stButton > button[kind="primary"]:not(:disabled) {
+    animation: dpp-btn-glow 3s ease-in-out infinite !important;
 }
 .stButton > button:disabled {
     background: #0d1424 !important;
@@ -235,6 +242,11 @@ html, body, .stApp,
 .stTabs [data-baseweb="tab-panel"] {
     background: transparent !important;
     padding: 14px 0 0 !important;
+    animation: dpp-panel-reveal 0.42s cubic-bezier(0.25,0.46,0.45,0.94) both !important;
+}
+@keyframes dpp-panel-reveal {
+    from { opacity:0; transform:translateY(14px); }
+    to   { opacity:1; transform:translateY(0); }
 }
 
 /* ── Alerts ─────────────────────────────────────────────── */
@@ -3184,13 +3196,199 @@ in one pipeline.</p>
 </div>
 """
 
+# ── Animated landing page (self-contained Anime.js iframe) ────────────────────
+
+_LANDING_IFRAME_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{
+  background:#0a0e1a;width:100%;height:100%;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;color:#94a3b8;
+}
+.dpp-land{
+  display:flex;align-items:center;height:100%;min-height:560px;
+  position:relative;overflow:hidden;
+  background:radial-gradient(ellipse at 32% 50%,#0d1e3a 0%,#06090f 70%);
+}
+.dpp-lvis{flex:0 0 55%;position:relative;height:560px;overflow:hidden;}
+.dpp-lvis-bg{
+  position:absolute;inset:0;
+  background:
+    radial-gradient(ellipse at 38% 42%,rgba(6,182,212,.22) 0%,transparent 52%),
+    radial-gradient(ellipse at 62% 22%,rgba(139,92,246,.18) 0%,transparent 46%),
+    radial-gradient(ellipse at 28% 74%,rgba(244,114,182,.14) 0%,transparent 42%),
+    radial-gradient(ellipse at 72% 72%,rgba(16,185,129,.12) 0%,transparent 40%);
+}
+.dpp-hx{position:absolute;border-radius:50%;pointer-events:none;}
+.dpp-hx1{width:400px;height:58px;top:8%;left:1%;
+  background:linear-gradient(135deg,transparent 0%,rgba(6,182,212,.5) 18%,rgba(34,211,238,1) 50%,rgba(6,182,212,.5) 82%,transparent 100%);
+  transform:rotate(-22deg);
+  box-shadow:0 0 38px rgba(34,211,238,.9),0 0 76px rgba(6,182,212,.5),0 0 130px rgba(6,182,212,.22);
+  animation:dpp-hx1a 13s ease-in-out infinite;}
+.dpp-hx2{width:310px;height:50px;top:43%;left:18%;
+  background:linear-gradient(135deg,transparent 0%,rgba(244,114,182,.5) 18%,rgba(251,113,133,1) 50%,rgba(244,114,182,.5) 82%,transparent 100%);
+  transform:rotate(14deg);
+  box-shadow:0 0 32px rgba(251,113,133,.9),0 0 65px rgba(244,114,182,.5),0 0 110px rgba(244,114,182,.22);
+  animation:dpp-hx2a 16s ease-in-out infinite 2s;}
+.dpp-hx3{width:240px;height:44px;top:20%;left:48%;
+  background:linear-gradient(135deg,transparent 0%,rgba(52,211,153,.5) 18%,rgba(110,231,183,1) 50%,rgba(52,211,153,.5) 82%,transparent 100%);
+  transform:rotate(-36deg);
+  box-shadow:0 0 28px rgba(110,231,183,.88),0 0 56px rgba(52,211,153,.46),0 0 95px rgba(52,211,153,.2);
+  animation:dpp-hx3a 19s ease-in-out infinite 4.5s;}
+.dpp-hx4{width:270px;height:46px;top:68%;left:38%;
+  background:linear-gradient(135deg,transparent 0%,rgba(245,158,11,.5) 18%,rgba(251,191,36,1) 50%,rgba(245,158,11,.5) 82%,transparent 100%);
+  transform:rotate(9deg);
+  box-shadow:0 0 30px rgba(251,191,36,.88),0 0 60px rgba(245,158,11,.46),0 0 100px rgba(245,158,11,.2);
+  animation:dpp-hx4a 14s ease-in-out infinite 3.5s;}
+.dpp-sh{position:absolute;pointer-events:none;}
+.dpp-sh1{width:210px;height:46px;top:52%;left:3%;
+  background:linear-gradient(90deg,rgba(139,92,246,.92) 0%,rgba(167,139,250,1) 62%,rgba(139,92,246,.3) 100%);
+  clip-path:polygon(0 24%,78% 24%,78% 0%,100% 50%,78% 100%,78% 76%,0 76%);
+  filter:drop-shadow(0 0 16px rgba(167,139,250,.9)) drop-shadow(0 0 34px rgba(139,92,246,.48));
+  animation:dpp-sh1a 17s ease-in-out infinite 1.2s;}
+.dpp-sh2{width:168px;height:38px;top:30%;left:3%;
+  background:linear-gradient(90deg,rgba(239,68,68,.88) 0%,rgba(252,165,165,1) 62%,rgba(239,68,68,.28) 100%);
+  clip-path:polygon(0 24%,78% 24%,78% 0%,100% 50%,78% 100%,78% 76%,0 76%);
+  filter:drop-shadow(0 0 13px rgba(252,165,165,.88)) drop-shadow(0 0 28px rgba(239,68,68,.44));
+  animation:dpp-sh2a 21s ease-in-out infinite 6s;}
+.dpp-lp{position:absolute;border-radius:50%;pointer-events:none;}
+.dpp-lp1{width:115px;height:76px;top:33%;left:30%;border-top:2.5px solid rgba(34,211,238,.58);animation:dpp-lp1a 13s ease-in-out infinite 1.8s;}
+.dpp-lp2{width:82px;height:54px;top:60%;left:27%;border-top:2px solid rgba(167,139,250,.52);animation:dpp-lp2a 18s ease-in-out infinite 4s;}
+.dpp-orb{position:absolute;border-radius:50%;pointer-events:none;}
+.dpp-orb1{width:480px;height:480px;top:-15%;left:-12%;background:radial-gradient(circle,rgba(6,182,212,.14) 0%,transparent 62%);filter:blur(44px);}
+.dpp-orb2{width:400px;height:400px;top:28%;left:16%;background:radial-gradient(circle,rgba(139,92,246,.12) 0%,transparent 62%);filter:blur(38px);}
+.dpp-orb3{width:360px;height:360px;top:52%;left:46%;background:radial-gradient(circle,rgba(244,114,182,.10) 0%,transparent 62%);filter:blur(34px);}
+.dpp-rfade{position:absolute;top:0;right:0;bottom:0;width:190px;background:linear-gradient(to right,transparent,#0a0e1a);pointer-events:none;}
+.dpp-tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#0a0e1a 0%,transparent 7%,transparent 93%,#0a0e1a 100%);pointer-events:none;}
+@keyframes dpp-hx1a{0%,100%{transform:rotate(-22deg) translate(0,0) scale(1)}35%{transform:rotate(-19deg) translate(10px,-7px) scale(1.03)}70%{transform:rotate(-25deg) translate(-7px,9px) scale(.97)}}
+@keyframes dpp-hx2a{0%,100%{transform:rotate(14deg) translate(0,0) scale(1)}40%{transform:rotate(16deg) translate(-11px,7px) scale(1.04)}80%{transform:rotate(11deg) translate(9px,-9px) scale(.96)}}
+@keyframes dpp-hx3a{0%,100%{transform:rotate(-36deg) translate(0,0) scale(1)}50%{transform:rotate(-33deg) translate(7px,11px) scale(1.05)}}
+@keyframes dpp-hx4a{0%,100%{transform:rotate(9deg) translate(0,0) scale(1)}45%{transform:rotate(12deg) translate(-9px,-7px) scale(1.04)}}
+@keyframes dpp-sh1a{0%,100%{transform:translate(0,0);opacity:.92}55%{transform:translate(13px,-9px);opacity:1}}
+@keyframes dpp-sh2a{0%,100%{transform:translate(0,0);opacity:.88}65%{transform:translate(-11px,11px);opacity:.97}}
+@keyframes dpp-lp1a{0%,100%{opacity:.46;transform:translate(0,0)}50%{opacity:.74;transform:translate(9px,-6px)}}
+@keyframes dpp-lp2a{0%,100%{opacity:.4;transform:translate(0,0)}55%{opacity:.66;transform:translate(-7px,8px)}}
+@keyframes dpp-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.dpp-ltxt{flex:0 0 45%;display:flex;flex-direction:column;justify-content:center;padding:0 52px 0 12px;position:relative;z-index:2;}
+.dpp-lbr{display:inline-flex;align-items:center;gap:8px;font-size:9.5px;font-weight:700;letter-spacing:.20em;text-transform:uppercase;color:#22d3ee;margin-bottom:24px;padding:5px 14px;border:1px solid rgba(34,211,238,.22);border-radius:20px;width:fit-content;background:rgba(34,211,238,.05);}
+.dpp-lbr-dot{width:6px;height:6px;border-radius:50%;background:#22d3ee;animation:dpp-pulse 2s infinite;}
+.dpp-lh{font-size:46px;font-weight:800;line-height:1.08;color:#f1f5f9;margin:0 0 2px;letter-spacing:-.03em;}
+.dpp-lhg{font-size:46px;font-weight:800;line-height:1.08;background:linear-gradient(120deg,#22d3ee 0%,#818cf8 50%,#f472b6 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin:0 0 26px;letter-spacing:-.03em;}
+.dpp-ldesc{font-size:13.5px;line-height:1.80;color:#64748b;margin:0 0 30px;max-width:340px;}
+.dpp-ltools{display:flex;flex-wrap:wrap;gap:6px;}
+.dpp-ltool{background:rgba(15,23,42,.9);border:1px solid rgba(51,65,85,.60);border-radius:6px;padding:4px 11px;font-size:10.5px;color:#94a3b8;font-weight:500;letter-spacing:.01em;}
+.dpp-char{display:inline-block;will-change:transform,opacity;}
+</style>
+</head>
+<body>
+<div class="dpp-land">
+  <div class="dpp-lvis">
+    <div class="dpp-lvis-bg"></div>
+    <div class="dpp-orb dpp-orb1"></div>
+    <div class="dpp-orb dpp-orb2"></div>
+    <div class="dpp-orb dpp-orb3"></div>
+    <div class="dpp-hx dpp-hx1"></div>
+    <div class="dpp-hx dpp-hx2"></div>
+    <div class="dpp-hx dpp-hx3"></div>
+    <div class="dpp-hx dpp-hx4"></div>
+    <div class="dpp-sh dpp-sh1"></div>
+    <div class="dpp-sh dpp-sh2"></div>
+    <div class="dpp-lp dpp-lp1"></div>
+    <div class="dpp-lp dpp-lp2"></div>
+    <div class="dpp-rfade"></div>
+    <div class="dpp-tbfade"></div>
+  </div>
+  <div class="dpp-ltxt">
+    <span class="dpp-lbr" id="dpp-badge"><span class="dpp-lbr-dot"></span>Dark Proteome Pipeline</span>
+    <p class="dpp-lh"  id="dpp-t1">Illuminate the</p>
+    <p class="dpp-lhg" id="dpp-t2">dark proteome</p>
+    <p class="dpp-ldesc" id="dpp-desc">Automated structural and functional annotation for uncharacterised microbial proteins — five complementary EBI REST APIs in one pipeline.</p>
+    <div class="dpp-ltools" id="dpp-chips">
+      <span class="dpp-ltool">InterProScan</span>
+      <span class="dpp-ltool">BLASTp</span>
+      <span class="dpp-ltool">FoldSeek</span>
+      <span class="dpp-ltool">Phobius</span>
+      <span class="dpp-ltool">HMMER</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* Pre-hide elements; fallback shows them all if Anime.js takes > 3 s */
+var _fb=setTimeout(function(){
+  ['#dpp-badge','#dpp-t1','#dpp-t2','#dpp-desc'].forEach(function(s){
+    var e=document.querySelector(s);if(e){e.style.opacity='1';e.style.transform='none';}
+  });
+  document.querySelectorAll('.dpp-ltool,.dpp-char,.dpp-orb,.dpp-hx,.dpp-sh,.dpp-lp')
+    .forEach(function(e){e.style.opacity='1';e.style.transform='none';});
+},3000);
+
+['#dpp-badge','#dpp-t2','#dpp-desc'].forEach(function(s){
+  var e=document.querySelector(s);if(e)e.style.opacity='0';
+});
+document.querySelectorAll('.dpp-ltool').forEach(function(e){e.style.opacity='0';e.style.transform='translateY(8px)';});
+document.querySelectorAll('.dpp-orb,.dpp-hx,.dpp-sh,.dpp-lp').forEach(function(e){e.style.opacity='0';});
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"
+        onload="dppAnimate()"
+        onerror="clearTimeout(_fb);document.querySelectorAll('[style]').forEach(function(e){e.style.opacity='1';e.style.transform='none';})">
+</script>
+
+<script>
+function dppAnimate(){
+  clearTimeout(_fb);
+
+  /* Split "Illuminate the" into per-character spans */
+  var t1=document.getElementById('dpp-t1');
+  t1.innerHTML=t1.textContent.split('').map(function(c){
+    return '<span class="dpp-char" style="opacity:0;transform:translateY(18px)">'+(c===' '?'&nbsp;':c)+'</span>';
+  }).join('');
+
+  document.getElementById('dpp-t2').style.transform='translateY(20px)';
+  document.getElementById('dpp-desc').style.transform='translateY(16px)';
+  document.getElementById('dpp-badge').style.transform='translateY(10px)';
+
+  var tl=anime.timeline({easing:'easeOutExpo'});
+
+  /* 1 — bioluminescent orbs bloom in */
+  tl.add({targets:'.dpp-orb',opacity:[0,1],duration:1100,delay:anime.stagger(160)});
+
+  /* 2 — structural elements scale + fade in */
+  tl.add({targets:['.dpp-hx','.dpp-sh','.dpp-lp'],
+    opacity:[0,1],scale:[0.88,1],duration:900,delay:anime.stagger(60)},'-=700');
+
+  /* 3 — badge */
+  tl.add({targets:'#dpp-badge',opacity:[0,1],translateY:[10,0],duration:650},'-=400');
+
+  /* 4 — "Illuminate the" letter by letter */
+  tl.add({targets:'#dpp-t1 .dpp-char',
+    opacity:[0,1],translateY:[18,0],duration:580,delay:anime.stagger(30)},'-=350');
+
+  /* 5 — "dark proteome" gradient text slides in */
+  tl.add({targets:'#dpp-t2',opacity:[0,1],translateY:[20,0],duration:720},'-=180');
+
+  /* 6 — description fades up */
+  tl.add({targets:'#dpp-desc',opacity:[0,1],translateY:[16,0],duration:580},'-=520');
+
+  /* 7 — tool chips stagger in */
+  tl.add({targets:'#dpp-chips .dpp-ltool',
+    opacity:[0,1],translateY:[10,0],duration:380,delay:anime.stagger(70)},'-=280');
+}
+</script>
+</body>
+</html>"""
+
 # ── Page routing ───────────────────────────────────────────────────────────────
 
 _page = st.session_state.get("page", "landing")
 
 if _page == "landing":
-    st.markdown(_LANDING_HTML, unsafe_allow_html=True)
-    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    components.html(_LANDING_IFRAME_HTML, height=580, scrolling=False)
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
     _, _cta, _ = st.columns([2, 3, 2])
     with _cta:
         if st.button("Begin Analysis  →", type="primary", use_container_width=True):
