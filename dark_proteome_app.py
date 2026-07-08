@@ -3220,6 +3220,54 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
 }
 @keyframes spin-ring{to{transform:rotate(360deg)}}
 
+/* ── CSS fallback visualization (shown when 3Dmol CDN fails) ── */
+.fb{display:none;position:absolute;inset:0;overflow:hidden;}
+.fb.on{display:block;}
+.fb-hx{position:absolute;border-radius:50%;pointer-events:none;}
+.fb-hx1{width:380px;height:52px;top:9%;left:2%;
+  background:linear-gradient(135deg,transparent 0%,rgba(6,182,212,.5) 18%,rgba(34,211,238,1) 50%,rgba(6,182,212,.5) 82%,transparent 100%);
+  transform:rotate(-22deg);
+  box-shadow:0 0 36px rgba(34,211,238,.9),0 0 72px rgba(6,182,212,.5),0 0 120px rgba(6,182,212,.2);
+  animation:fbhx1 13s ease-in-out infinite;}
+.fb-hx2{width:300px;height:46px;top:44%;left:16%;
+  background:linear-gradient(135deg,transparent 0%,rgba(244,114,182,.5) 18%,rgba(251,113,133,1) 50%,rgba(244,114,182,.5) 82%,transparent 100%);
+  transform:rotate(14deg);
+  box-shadow:0 0 30px rgba(251,113,133,.9),0 0 62px rgba(244,114,182,.5),0 0 105px rgba(244,114,182,.2);
+  animation:fbhx2 16s ease-in-out infinite 2s;}
+.fb-hx3{width:230px;height:42px;top:21%;left:47%;
+  background:linear-gradient(135deg,transparent 0%,rgba(52,211,153,.5) 18%,rgba(110,231,183,1) 50%,rgba(52,211,153,.5) 82%,transparent 100%);
+  transform:rotate(-36deg);
+  box-shadow:0 0 26px rgba(110,231,183,.88),0 0 52px rgba(52,211,153,.46);
+  animation:fbhx3 19s ease-in-out infinite 4.5s;}
+.fb-hx4{width:260px;height:44px;top:68%;left:37%;
+  background:linear-gradient(135deg,transparent 0%,rgba(245,158,11,.5) 18%,rgba(251,191,36,1) 50%,rgba(245,158,11,.5) 82%,transparent 100%);
+  transform:rotate(9deg);
+  box-shadow:0 0 28px rgba(251,191,36,.88),0 0 56px rgba(245,158,11,.46);
+  animation:fbhx4 14s ease-in-out infinite 3.5s;}
+.fb-sh{position:absolute;pointer-events:none;}
+.fb-sh1{width:200px;height:44px;top:53%;left:4%;
+  background:linear-gradient(90deg,rgba(139,92,246,.9) 0%,rgba(167,139,250,1) 62%,rgba(139,92,246,.3) 100%);
+  clip-path:polygon(0 24%,78% 24%,78% 0%,100% 50%,78% 100%,78% 76%,0 76%);
+  filter:drop-shadow(0 0 14px rgba(167,139,250,.9)) drop-shadow(0 0 30px rgba(139,92,246,.48));
+  animation:fbsh1 17s ease-in-out infinite 1.2s;}
+.fb-sh2{width:160px;height:36px;top:31%;left:4%;
+  background:linear-gradient(90deg,rgba(239,68,68,.85) 0%,rgba(252,165,165,1) 62%,rgba(239,68,68,.25) 100%);
+  clip-path:polygon(0 24%,78% 24%,78% 0%,100% 50%,78% 100%,78% 76%,0 76%);
+  filter:drop-shadow(0 0 12px rgba(252,165,165,.88)) drop-shadow(0 0 26px rgba(239,68,68,.44));
+  animation:fbsh2 21s ease-in-out infinite 6s;}
+.fb-orb{position:absolute;border-radius:50%;pointer-events:none;}
+.fb-orb1{width:460px;height:460px;top:-14%;left:-10%;background:radial-gradient(circle,rgba(6,182,212,.13) 0%,transparent 62%);filter:blur(42px);}
+.fb-orb2{width:380px;height:380px;top:28%;left:14%;background:radial-gradient(circle,rgba(139,92,246,.11) 0%,transparent 62%);filter:blur(36px);}
+.fb-orb3{width:340px;height:340px;top:52%;left:44%;background:radial-gradient(circle,rgba(244,114,182,.09) 0%,transparent 62%);filter:blur(32px);}
+.fb-rfade{position:absolute;top:0;right:0;bottom:0;width:160px;background:linear-gradient(to right,transparent,#0a0e1a);pointer-events:none;}
+.fb-tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#0a0e1a 0%,transparent 8%,transparent 92%,#0a0e1a 100%);pointer-events:none;}
+@keyframes fbhx1{0%,100%{transform:rotate(-22deg) translate(0,0) scale(1)}35%{transform:rotate(-19deg) translate(10px,-7px) scale(1.03)}70%{transform:rotate(-25deg) translate(-7px,9px) scale(.97)}}
+@keyframes fbhx2{0%,100%{transform:rotate(14deg) translate(0,0) scale(1)}40%{transform:rotate(16deg) translate(-11px,7px) scale(1.04)}80%{transform:rotate(11deg) translate(9px,-9px) scale(.96)}}
+@keyframes fbhx3{0%,100%{transform:rotate(-36deg) translate(0,0) scale(1)}50%{transform:rotate(-33deg) translate(7px,11px) scale(1.05)}}
+@keyframes fbhx4{0%,100%{transform:rotate(9deg) translate(0,0) scale(1)}45%{transform:rotate(12deg) translate(-9px,-7px) scale(1.04)}}
+@keyframes fbsh1{0%,100%{transform:translate(0,0);opacity:.9}55%{transform:translate(13px,-9px);opacity:1}}
+@keyframes fbsh2{0%,100%{transform:translate(0,0);opacity:.85}65%{transform:translate(-11px,11px);opacity:.97}}
+
 /* ── Right: futuristic grid panel ── */
 .hero-right{
   flex:0 0 48%;
@@ -3274,10 +3322,23 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
 <body>
 <div class="hero">
 
-  <!-- Left: 3Dmol auto-rotating rainbow ribbon -->
+  <!-- Left: 3Dmol auto-rotating rainbow ribbon (CSS fallback if CDN blocked) -->
   <div class="hero-left">
     <div id="mol-viewer"></div>
     <div class="vload" id="vload"><div class="vload-ring"></div></div>
+    <div class="fb" id="fb">
+      <div class="fb-orb fb-orb1"></div>
+      <div class="fb-orb fb-orb2"></div>
+      <div class="fb-orb fb-orb3"></div>
+      <div class="fb-hx fb-hx1"></div>
+      <div class="fb-hx fb-hx2"></div>
+      <div class="fb-hx fb-hx3"></div>
+      <div class="fb-hx fb-hx4"></div>
+      <div class="fb-sh fb-sh1"></div>
+      <div class="fb-sh fb-sh2"></div>
+      <div class="fb-rfade"></div>
+      <div class="fb-tbfade"></div>
+    </div>
   </div>
 
   <!-- Right: grid text panel -->
@@ -3311,32 +3372,50 @@ var _fb=setTimeout(function(){
 document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='0';e.style.transform='translateY(6px)';});
 </script>
 
-<!-- 3Dmol.js protein viewer (VASE.pdb embedded as base64) -->
+<!-- 3Dmol.js protein viewer — cascades through CDNs, CSS fallback if all fail -->
 <script>
 (function(){
   var b64='__VASE_B64__';
+  var cdns=[
+    'https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js',
+    'https://unpkg.com/3dmol@2.4.2/build/3Dmol-min.js',
+    'https://3dmol.org/build/3Dmol-min.js',
+  ];
+  var idx=0;
+
+  function showFallback(){
+    var vl=document.getElementById('vload');if(vl)vl.style.opacity='0';
+    var fb=document.getElementById('fb');if(fb)fb.classList.add('on');
+  }
+
   function initViewer(){
     if(typeof $3Dmol==='undefined'){setTimeout(initViewer,80);return;}
-    var container=document.getElementById('mol-viewer');
-    var viewer=$3Dmol.createViewer(container,{
-      backgroundColor:'#0a0e1a',
-      antialias:true,
-      disableFog:true,
-    });
-    viewer.addModel(atob(b64),'pdb');
-    viewer.setStyle({},{cartoon:{colorscheme:'rainbow'}});
-    viewer.zoomTo();
-    viewer.zoom(0.88);
-    viewer.spin('y',0.8);
-    viewer.render();
-    var vl=document.getElementById('vload');
-    if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},1100);}
+    try{
+      var container=document.getElementById('mol-viewer');
+      var viewer=$3Dmol.createViewer(container,{
+        backgroundColor:'#0a0e1a',antialias:true,disableFog:true,
+      });
+      viewer.addModel(atob(b64),'pdb');
+      viewer.setStyle({},{cartoon:{colorscheme:'rainbow'}});
+      viewer.zoomTo();
+      viewer.zoom(0.88);
+      viewer.spin('y',0.8);
+      viewer.render();
+      var vl=document.getElementById('vload');
+      if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},1100);}
+    }catch(e){showFallback();}
   }
-  var s=document.createElement('script');
-  s.src='https://3dmol.org/build/3Dmol-min.js';
-  s.onload=function(){setTimeout(initViewer,60);};
-  s.onerror=function(){var vl=document.getElementById('vload');if(vl)vl.style.opacity='0';};
-  document.head.appendChild(s);
+
+  function tryNext(){
+    if(idx>=cdns.length){showFallback();return;}
+    var s=document.createElement('script');
+    s.src=cdns[idx++];
+    s.onload=function(){setTimeout(initViewer,60);};
+    s.onerror=tryNext;
+    document.head.appendChild(s);
+  }
+
+  tryNext();
 })();
 </script>
 
