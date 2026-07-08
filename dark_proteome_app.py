@@ -3363,7 +3363,6 @@ with col_right:
     _fasta_ss = st.session_state.get("fasta_text")
 
     if not _res and not _pdb_ss:
-        # Empty-state placeholder — also shown when a session expires and results are lost
         _had_prior = bool(st.session_state.get("active_tools"))
         if _had_prior:
             st.info(
@@ -3381,8 +3380,8 @@ with col_right:
             bar_bg  = "rgba(34,197,94,0.06)"  if all_ok else "rgba(245,158,11,0.06)"
             bar_bdr = "rgba(34,197,94,0.15)"  if all_ok else "rgba(245,158,11,0.15)"
 
-            _summary_col, _dl_col = st.columns([3, 1])
-            with _summary_col:
+            _sum_col, _dl_col, _clr_col = st.columns([2.4, 0.9, 0.7])
+            with _sum_col:
                 st.markdown(
                     f'<div style="background:{bar_bg};border:1px solid {bar_bdr};border-radius:8px;'
                     f'padding:10px 16px;display:flex;align-items:center;gap:8px;">'
@@ -3394,13 +3393,20 @@ with col_right:
                 _pname = st.session_state.get("protein_name", "protein")
                 _fname = f"dpp_{_pname}_{time.strftime('%Y%m%d_%H%M%S')}.json"
                 st.download_button(
-                    label="⬇ Download JSON",
+                    label="⬇ JSON",
                     data=_results_to_json_bytes(_res, _pname),
                     file_name=_fname,
                     mime="application/json",
                     help="Save all results locally before the session expires",
                     use_container_width=True,
                 )
+            with _clr_col:
+                if st.button("✕ Clear", help="Clear results and return to landing page",
+                             use_container_width=True, key="clear_results"):
+                    for _k in ["results", "fasta_text", "pdb_text",
+                               "active_tools", "protein_name"]:
+                        st.session_state.pop(_k, None)
+                    st.rerun()
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             # Inline error banners for failed tools — full error text, always visible
