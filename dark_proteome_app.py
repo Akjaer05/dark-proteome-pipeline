@@ -136,18 +136,18 @@ html, body, .stApp,
 }
 .block-container { padding: 0 !important; max-width: 100% !important; }
 
-/* ── Column layout ──────────────────────────────────────── */
+/* ── Column layout — sidebar only on 2-column layouts ──────────────────────── */
 [data-testid="stHorizontalBlock"] {
     gap: 0 !important;
     align-items: stretch !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
+[data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:first-child {
     background: #080c17 !important;
     border-right: 1px solid #1e2d4a !important;
     padding: 28px 20px 60px !important;
     min-height: 65vh;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="column"]:last-child {
+[data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:last-child {
     padding: 22px 28px 60px !important;
 }
 
@@ -377,67 +377,7 @@ st.markdown(f"""
 </nav>
 """, unsafe_allow_html=True)
 
-# ── Hero ───────────────────────────────────────────────────────────────────────
-
-def _badge(text, coming_soon=False):
-    if coming_soon:
-        return (
-            f'<span style="background:rgba(100,116,139,0.05);color:#334155;'
-            f'border:1px solid #1e2d4a;padding:3px 11px;border-radius:20px;'
-            f'font-size:11px;font-weight:500;">'
-            f'{text}&thinsp;<span style="font-size:9px;opacity:0.65;'
-            f'font-style:italic;">soon</span></span>'
-        )
-    return (
-        f'<span style="background:rgba(34,197,94,0.07);color:#22c55e;'
-        f'border:1px solid rgba(34,197,94,0.18);padding:3px 11px;'
-        f'border-radius:20px;font-size:11px;font-weight:500;">{text}</span>'
-    )
-
-_tool_badges = " ".join([
-    _badge("InterProScan"),
-    _badge("BLASTp"),
-    _badge("Phobius"),
-    _badge("HMMER"),
-    _badge("FoldSeek"),
-    _badge("SignalP 6.0", coming_soon=True),
-    _badge("HHpred",      coming_soon=True),
-])
-
-st.markdown(f"""
-<div style="background:linear-gradient(180deg,#0c1527 0%,#0a0e1a 100%);
-            padding:44px 32px 38px; border-bottom:1px solid #1e2d4a;">
-  <div style="max-width:820px;">
-    <div style="display:inline-flex; align-items:center; gap:5px;
-                background:rgba(59,130,246,0.07); color:#3b82f6;
-                border:1px solid rgba(59,130,246,0.16);
-                padding:3px 11px; border-radius:20px;
-                font-size:9.5px; font-weight:700; letter-spacing:0.12em;
-                text-transform:uppercase; margin-bottom:18px;">
-      &#x25CF;&ensp;Structural Bioinformatics
-    </div>
-    <h1 style="font-size:27px; font-weight:700; color:#f0f6ff; line-height:1.32;
-               letter-spacing:-0.02em; margin:0 0 12px;">
-      Annotate hypothetical proteins<br>from the microbial dark proteome
-    </h1>
-    <p style="font-size:13.5px; color:#475569; line-height:1.65;
-              margin:0 0 22px; max-width:600px;">
-      Multi-tool parallel annotation pipeline for uncharacterised bacterial proteins.
-      Upload a FASTA sequence and optionally an AlphaFold2 PDB structure to run all
-      tools simultaneously.
-    </p>
-    <div style="display:flex; flex-wrap:wrap; gap:7px; align-items:center;">
-      <span style="font-size:9.5px; color:#334155; font-weight:700;
-                   letter-spacing:0.1em; text-transform:uppercase; margin-right:2px;">
-        Tools
-      </span>
-      {_tool_badges}
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-# ── Tool runners (unchanged) ───────────────────────────────────────────────────
+# ── Tool runners ──────────────────────────────────────────────────────────────
 
 def _ebi_poll(base_url, job_id):
     terminal = {"FINISHED", "FAILURE", "ERROR", "NOT_FOUND", "CANCELLED"}
@@ -3001,16 +2941,271 @@ if not EMAIL:
     )
     st.stop()
 
-# ── Two-column layout ──────────────────────────────────────────────────────────
+# ── Page HTML constants ─────────────────────────────────────────────────────────
+
+_LANDING_HTML = """
+<style>
+.dpp-land {
+  display: flex;
+  align-items: center;
+  min-height: 75vh;
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: radial-gradient(ellipse at 32% 50%, #0d1e3a 0%, #06090f 70%);
+}
+
+/* ── Left: protein visualization (55%) ── */
+.dpp-lvis {
+  flex: 0 0 55%;
+  position: relative;
+  min-height: 75vh;
+  overflow: hidden;
+}
+.dpp-lvis-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(ellipse at 38% 42%, rgba(6,182,212,0.22) 0%, transparent 52%),
+    radial-gradient(ellipse at 62% 22%, rgba(139,92,246,0.18) 0%, transparent 46%),
+    radial-gradient(ellipse at 28% 74%, rgba(244,114,182,0.14) 0%, transparent 42%),
+    radial-gradient(ellipse at 72% 72%, rgba(16,185,129,0.12) 0%, transparent 40%);
+}
+
+/* ─── Helix ribbons (elongated, angled, glowing) ─── */
+.dpp-hx { position: absolute; border-radius: 50%; pointer-events: none; }
+.dpp-hx1 {
+  width: 400px; height: 58px;
+  top: 8%; left: 1%;
+  background: linear-gradient(135deg,
+    transparent 0%, rgba(6,182,212,0.5) 18%,
+    rgba(34,211,238,1.0) 50%, rgba(6,182,212,0.5) 82%, transparent 100%);
+  transform: rotate(-22deg);
+  box-shadow: 0 0 38px rgba(34,211,238,0.90), 0 0 76px rgba(6,182,212,0.50), 0 0 130px rgba(6,182,212,0.22);
+  animation: dpp-hx1a 13s ease-in-out infinite;
+}
+.dpp-hx2 {
+  width: 310px; height: 50px;
+  top: 43%; left: 18%;
+  background: linear-gradient(135deg,
+    transparent 0%, rgba(244,114,182,0.5) 18%,
+    rgba(251,113,133,1.0) 50%, rgba(244,114,182,0.5) 82%, transparent 100%);
+  transform: rotate(14deg);
+  box-shadow: 0 0 32px rgba(251,113,133,0.90), 0 0 65px rgba(244,114,182,0.50), 0 0 110px rgba(244,114,182,0.22);
+  animation: dpp-hx2a 16s ease-in-out infinite 2s;
+}
+.dpp-hx3 {
+  width: 240px; height: 44px;
+  top: 20%; left: 48%;
+  background: linear-gradient(135deg,
+    transparent 0%, rgba(52,211,153,0.5) 18%,
+    rgba(110,231,183,1.0) 50%, rgba(52,211,153,0.5) 82%, transparent 100%);
+  transform: rotate(-36deg);
+  box-shadow: 0 0 28px rgba(110,231,183,0.88), 0 0 56px rgba(52,211,153,0.46), 0 0 95px rgba(52,211,153,0.20);
+  animation: dpp-hx3a 19s ease-in-out infinite 4.5s;
+}
+.dpp-hx4 {
+  width: 270px; height: 46px;
+  top: 68%; left: 38%;
+  background: linear-gradient(135deg,
+    transparent 0%, rgba(245,158,11,0.5) 18%,
+    rgba(251,191,36,1.0) 50%, rgba(245,158,11,0.5) 82%, transparent 100%);
+  transform: rotate(9deg);
+  box-shadow: 0 0 30px rgba(251,191,36,0.88), 0 0 60px rgba(245,158,11,0.46), 0 0 100px rgba(245,158,11,0.20);
+  animation: dpp-hx4a 14s ease-in-out infinite 3.5s;
+}
+
+/* ─── Beta-sheet arrows ─── */
+.dpp-sh { position: absolute; pointer-events: none; }
+.dpp-sh1 {
+  width: 210px; height: 46px;
+  top: 52%; left: 3%;
+  background: linear-gradient(90deg,
+    rgba(139,92,246,0.92) 0%, rgba(167,139,250,1.00) 62%, rgba(139,92,246,0.30) 100%);
+  clip-path: polygon(0 24%, 78% 24%, 78% 0%, 100% 50%, 78% 100%, 78% 76%, 0 76%);
+  filter: drop-shadow(0 0 16px rgba(167,139,250,0.90)) drop-shadow(0 0 34px rgba(139,92,246,0.48));
+  animation: dpp-sh1a 17s ease-in-out infinite 1.2s;
+}
+.dpp-sh2 {
+  width: 168px; height: 38px;
+  top: 30%; left: 3%;
+  background: linear-gradient(90deg,
+    rgba(239,68,68,0.88) 0%, rgba(252,165,165,1.00) 62%, rgba(239,68,68,0.28) 100%);
+  clip-path: polygon(0 24%, 78% 24%, 78% 0%, 100% 50%, 78% 100%, 78% 76%, 0 76%);
+  filter: drop-shadow(0 0 13px rgba(252,165,165,0.88)) drop-shadow(0 0 28px rgba(239,68,68,0.44));
+  animation: dpp-sh2a 21s ease-in-out infinite 6s;
+}
+
+/* ─── Loop-arc connectors ─── */
+.dpp-lp { position: absolute; border-radius: 50%; pointer-events: none; }
+.dpp-lp1 {
+  width: 115px; height: 76px;
+  top: 33%; left: 30%;
+  border-top: 2.5px solid rgba(34,211,238,0.58);
+  animation: dpp-lp1a 13s ease-in-out infinite 1.8s;
+}
+.dpp-lp2 {
+  width: 82px; height: 54px;
+  top: 60%; left: 27%;
+  border-top: 2px solid rgba(167,139,250,0.52);
+  animation: dpp-lp2a 18s ease-in-out infinite 4s;
+}
+
+/* ─── Large ambient depth orbs ─── */
+.dpp-orb { position: absolute; border-radius: 50%; pointer-events: none; }
+.dpp-orb1 {
+  width: 480px; height: 480px; top: -15%; left: -12%;
+  background: radial-gradient(circle, rgba(6,182,212,0.14) 0%, transparent 62%);
+  filter: blur(44px);
+}
+.dpp-orb2 {
+  width: 400px; height: 400px; top: 28%; left: 16%;
+  background: radial-gradient(circle, rgba(139,92,246,0.12) 0%, transparent 62%);
+  filter: blur(38px);
+}
+.dpp-orb3 {
+  width: 360px; height: 360px; top: 52%; left: 46%;
+  background: radial-gradient(circle, rgba(244,114,182,0.10) 0%, transparent 62%);
+  filter: blur(34px);
+}
+
+/* Edge fades into page background */
+.dpp-rfade {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 190px;
+  background: linear-gradient(to right, transparent, #06090f);
+  pointer-events: none;
+}
+.dpp-tbfade {
+  position: absolute; inset: 0;
+  background: linear-gradient(to bottom, #06090f 0%, transparent 7%, transparent 93%, #06090f 100%);
+  pointer-events: none;
+}
+
+/* ── Keyframes ── */
+@keyframes dpp-hx1a{0%,100%{transform:rotate(-22deg) translate(0,0) scale(1)}35%{transform:rotate(-19deg) translate(10px,-7px) scale(1.03)}70%{transform:rotate(-25deg) translate(-7px,9px) scale(0.97)}}
+@keyframes dpp-hx2a{0%,100%{transform:rotate(14deg) translate(0,0) scale(1)}40%{transform:rotate(16deg) translate(-11px,7px) scale(1.04)}80%{transform:rotate(11deg) translate(9px,-9px) scale(0.96)}}
+@keyframes dpp-hx3a{0%,100%{transform:rotate(-36deg) translate(0,0) scale(1)}50%{transform:rotate(-33deg) translate(7px,11px) scale(1.05)}}
+@keyframes dpp-hx4a{0%,100%{transform:rotate(9deg) translate(0,0) scale(1)}45%{transform:rotate(12deg) translate(-9px,-7px) scale(1.04)}}
+@keyframes dpp-sh1a{0%,100%{transform:translate(0,0);opacity:.92}55%{transform:translate(13px,-9px);opacity:1}}
+@keyframes dpp-sh2a{0%,100%{transform:translate(0,0);opacity:.88}65%{transform:translate(-11px,11px);opacity:.97}}
+@keyframes dpp-lp1a{0%,100%{opacity:.46;transform:translate(0,0)}50%{opacity:.74;transform:translate(9px,-6px)}}
+@keyframes dpp-lp2a{0%,100%{opacity:.40;transform:translate(0,0)}55%{opacity:.66;transform:translate(-7px,8px)}}
+@keyframes dpp-pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+
+/* ── Right: text panel (45%) ── */
+.dpp-ltxt {
+  flex: 0 0 45%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 52px 0 12px;
+  position: relative;
+  z-index: 2;
+}
+.dpp-lbr {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: #22d3ee;
+  margin-bottom: 24px;
+  padding: 5px 14px;
+  border: 1px solid rgba(34,211,238,0.22);
+  border-radius: 20px;
+  width: fit-content;
+  background: rgba(34,211,238,0.05);
+}
+.dpp-lbr-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #22d3ee;
+  animation: dpp-pulse 2s infinite;
+}
+.dpp-lh {
+  font-size: 46px !important; font-weight: 800 !important; line-height: 1.08 !important;
+  color: #f1f5f9 !important; margin: 0 0 2px !important; letter-spacing: -0.03em !important;
+}
+.dpp-lhg {
+  font-size: 46px !important; font-weight: 800 !important; line-height: 1.08 !important;
+  background: linear-gradient(120deg, #22d3ee 0%, #818cf8 50%, #f472b6 100%) !important;
+  -webkit-background-clip: text !important; -webkit-text-fill-color: transparent !important;
+  background-clip: text !important; margin: 0 0 26px !important; letter-spacing: -0.03em !important;
+}
+.dpp-ldesc {
+  font-size: 13.5px !important; line-height: 1.80 !important; color: #64748b !important;
+  margin: 0 0 30px !important; max-width: 340px !important;
+}
+.dpp-ltools { display: flex !important; flex-wrap: wrap !important; gap: 6px !important; }
+.dpp-ltool {
+  background: rgba(15,23,42,0.9) !important; border: 1px solid rgba(51,65,85,0.60) !important;
+  border-radius: 6px !important; padding: 4px 11px !important; font-size: 10.5px !important;
+  color: #94a3b8 !important; font-weight: 500 !important; letter-spacing: 0.01em !important;
+}
+</style>
+
+<div class="dpp-land">
+  <div class="dpp-lvis">
+    <div class="dpp-lvis-bg"></div>
+    <div class="dpp-orb dpp-orb1"></div>
+    <div class="dpp-orb dpp-orb2"></div>
+    <div class="dpp-orb dpp-orb3"></div>
+    <div class="dpp-hx dpp-hx1"></div>
+    <div class="dpp-hx dpp-hx2"></div>
+    <div class="dpp-hx dpp-hx3"></div>
+    <div class="dpp-hx dpp-hx4"></div>
+    <div class="dpp-sh dpp-sh1"></div>
+    <div class="dpp-sh dpp-sh2"></div>
+    <div class="dpp-lp dpp-lp1"></div>
+    <div class="dpp-lp dpp-lp2"></div>
+    <div class="dpp-rfade"></div>
+    <div class="dpp-tbfade"></div>
+  </div>
+  <div class="dpp-ltxt">
+    <span class="dpp-lbr"><span class="dpp-lbr-dot"></span>Dark Proteome Pipeline</span>
+    <p class="dpp-lh">Illuminate the</p>
+    <p class="dpp-lhg">dark proteome</p>
+    <p class="dpp-ldesc">Automated structural and functional annotation for
+uncharacterised microbial proteins — five complementary EBI REST APIs
+in one pipeline.</p>
+    <div class="dpp-ltools">
+      <span class="dpp-ltool">InterProScan</span>
+      <span class="dpp-ltool">BLASTp</span>
+      <span class="dpp-ltool">FoldSeek</span>
+      <span class="dpp-ltool">Phobius</span>
+      <span class="dpp-ltool">HMMER</span>
+    </div>
+  </div>
+</div>
+"""
+
+# ── Page routing ───────────────────────────────────────────────────────────────
+
+_page = st.session_state.get("page", "landing")
+
+if _page == "landing":
+    st.markdown(_LANDING_HTML, unsafe_allow_html=True)
+    st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+    _, _cta, _ = st.columns([2, 3, 2])
+    with _cta:
+        if st.button("Begin Analysis  →", type="primary", use_container_width=True):
+            st.session_state["page"] = "analysis"
+            st.rerun()
+    st.stop()
+
+# ── Analysis page ──────────────────────────────────────────────────────────────
 
 col_left, col_right = st.columns([3, 9], gap="small")
 
 # ── Left panel — input + status ────────────────────────────────────────────────
 
 with col_left:
+    if st.button("← Home", key="back_home"):
+        st.session_state["page"] = "landing"
+        st.rerun()
     st.markdown(
         '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;'
-        'letter-spacing:0.12em;text-transform:uppercase;margin-bottom:16px;">Input</p>',
+        'letter-spacing:0.12em;text-transform:uppercase;margin:18px 0 16px;">Input</p>',
         unsafe_allow_html=True,
     )
 
@@ -3028,7 +3223,7 @@ with col_left:
     st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
 
     run = st.button(
-        "Run Pipeline",
+        "Run Analysis",
         type="primary",
         disabled=not (fasta_file or pdb_file),
     )
@@ -3150,206 +3345,26 @@ with col_left:
         unsafe_allow_html=True,
     )
 
-# ── Hero markup (shown when no results have been loaded yet) ──────────────────
-# Rendered via st.markdown so it lives directly in Streamlit's DOM — no iframe,
-# no CDN dependency. The <style> block is injected into the page's stylesheet by
-# Streamlit's unsafe_allow_html rendering path, so @keyframes animations work.
+# ── Analysis empty-state HTML ───────────────────────────────────────────────────
 
-_HERO_HTML = """
-<style>
-/* Scoped with .dpp-hero prefix to avoid colliding with Streamlit's own CSS */
-.dpp-hero {
-  display: flex;
-  align-items: center;
-  min-height: 460px;
-  gap: 0;
-  position: relative;
-  overflow: hidden;
-}
-
-/* ── Left: animated protein-glow visual ── */
-.dpp-vp {
-  flex: 0 0 52%;
-  position: relative;
-  min-height: 460px;
-  overflow: hidden;
-}
-/* Soft ambient light behind the blobs */
-.dpp-vp-bg {
-  position: absolute; inset: 0;
-  background:
-    radial-gradient(ellipse at 35% 50%, rgba(6,182,212,0.12) 0%, transparent 55%),
-    radial-gradient(ellipse at 70% 25%, rgba(139,92,246,0.10) 0%, transparent 50%),
-    radial-gradient(ellipse at 55% 78%, rgba(244,114,182,0.08) 0%, transparent 45%);
-}
-/* Individual glowing orbs */
-.dpp-b {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-.dpp-b1 { width:260px;height:260px;top:4%;left:3%;
-  background:radial-gradient(circle,rgba(6,182,212,0.60) 0%,transparent 68%);
-  filter:blur(36px); animation:dpp-f1 14s ease-in-out infinite; }
-.dpp-b2 { width:220px;height:220px;top:38%;left:28%;
-  background:radial-gradient(circle,rgba(139,92,246,0.55) 0%,transparent 68%);
-  filter:blur(30px); animation:dpp-f2 11s ease-in-out infinite 2s; }
-.dpp-b3 { width:200px;height:200px;top:18%;left:50%;
-  background:radial-gradient(circle,rgba(244,114,182,0.50) 0%,transparent 68%);
-  filter:blur(28px); animation:dpp-f3 13s ease-in-out infinite 4s; }
-.dpp-b4 { width:170px;height:170px;top:60%;left:6%;
-  background:radial-gradient(circle,rgba(16,185,129,0.45) 0%,transparent 68%);
-  filter:blur(24px); animation:dpp-f4 15s ease-in-out infinite 1s; }
-.dpp-b5 { width:140px;height:140px;top:66%;left:58%;
-  background:radial-gradient(circle,rgba(245,158,11,0.45) 0%,transparent 68%);
-  filter:blur(20px); animation:dpp-f5 10s ease-in-out infinite 3s; }
-/* Bright tight cores give the fluorescent-microscopy look */
-.dpp-c1 { width:68px;height:68px;top:18%;left:17%;
-  background:radial-gradient(circle,rgba(34,211,238,0.90) 0%,transparent 60%);
-  filter:blur(7px); animation:dpp-f1 14s ease-in-out infinite 0.5s; }
-.dpp-c2 { width:52px;height:52px;top:50%;left:42%;
-  background:radial-gradient(circle,rgba(196,181,253,0.95) 0%,transparent 60%);
-  filter:blur(5px); animation:dpp-f2 11s ease-in-out infinite 3s; }
-.dpp-c3 { width:60px;height:60px;top:28%;left:64%;
-  background:radial-gradient(circle,rgba(251,114,182,0.90) 0%,transparent 60%);
-  filter:blur(6px); animation:dpp-f3 13s ease-in-out infinite 5s; }
-.dpp-c4 { width:46px;height:46px;top:73%;left:22%;
-  background:radial-gradient(circle,rgba(52,211,153,0.85) 0%,transparent 60%);
-  filter:blur(5px); animation:dpp-f4 15s ease-in-out infinite 2s; }
-/* Right-edge gradient fade into dark background */
-.dpp-fade {
-  position: absolute; top:0; right:0; bottom:0; width:130px;
-  background: linear-gradient(to right, transparent, #0a0e1a);
-  pointer-events: none;
-}
-/* Top/bottom fades */
-.dpp-fade-tb {
-  position: absolute; inset:0;
-  background: linear-gradient(to bottom,
-    #0a0e1a 0%, transparent 10%,
-    transparent 90%, #0a0e1a 100%);
-  pointer-events: none;
-}
-@keyframes dpp-f1{0%,100%{transform:translate(0,0)scale(1)}33%{transform:translate(22px,-28px)scale(1.08)}66%{transform:translate(-18px,18px)scale(0.95)}}
-@keyframes dpp-f2{0%,100%{transform:translate(0,0)scale(1)}25%{transform:translate(-28px,22px)scale(1.06)}75%{transform:translate(18px,-18px)scale(0.94)}}
-@keyframes dpp-f3{0%,100%{transform:translate(0,0)scale(1)}40%{transform:translate(18px,28px)scale(1.07)}80%{transform:translate(-22px,-14px)scale(0.96)}}
-@keyframes dpp-f4{0%,100%{transform:translate(0,0)scale(1)}50%{transform:translate(28px,-22px)scale(1.09)}}
-@keyframes dpp-f5{0%,100%{transform:translate(0,0)scale(1)}60%{transform:translate(-18px,18px)scale(1.05)}}
-
-/* ── Right: title text ── */
-.dpp-tp {
-  flex: 0 0 48%;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 16px 0 8px;
-}
-.dpp-ey {
-  font-size: 9px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.22em !important;
-  text-transform: uppercase !important;
-  color: #3b82f6 !important;
-  margin-bottom: 18px !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
-}
-.dpp-ey::before {
-  content: '';
-  display: inline-block;
-  width: 22px; height: 1px;
-  background: #3b82f6;
-  flex-shrink: 0;
-}
-.dpp-h1 {
-  font-size: 36px !important;
-  font-weight: 800 !important;
-  line-height: 1.1 !important;
-  color: #e2e8f0 !important;
-  margin: 0 0 14px !important;
-  letter-spacing: -0.02em !important;
-}
-.dpp-ac {
-  background: linear-gradient(125deg, #22d3ee 0%, #818cf8 55%, #f472b6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-.dpp-ds {
-  font-size: 13px !important;
-  line-height: 1.72 !important;
-  color: #475569 !important;
-  margin: 0 0 26px !important;
-  max-width: 300px !important;
-}
-.dpp-chips {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 6px !important;
-  margin-bottom: 28px !important;
-}
-.dpp-chip {
-  background: rgba(15,23,42,0.95) !important;
-  border: 1px solid rgba(51,65,85,0.65) !important;
-  border-radius: 20px !important;
-  padding: 3px 11px !important;
-  font-size: 10px !important;
-  color: #475569 !important;
-  font-weight: 500 !important;
-}
-.dpp-hint {
-  font-size: 11px !important;
-  color: #1e3a5f !important;
-  display: flex !important;
-  align-items: center !important;
-  gap: 7px !important;
-}
-.dpp-arrow { color: #3b82f6 !important; font-size: 14px !important; }
-</style>
-
-<div class="dpp-hero">
-
-  <!-- Animated protein glow visual -->
-  <div class="dpp-vp">
-    <div class="dpp-vp-bg"></div>
-    <div class="dpp-b dpp-b1"></div>
-    <div class="dpp-b dpp-b2"></div>
-    <div class="dpp-b dpp-b3"></div>
-    <div class="dpp-b dpp-b4"></div>
-    <div class="dpp-b dpp-b5"></div>
-    <div class="dpp-b dpp-c1"></div>
-    <div class="dpp-b dpp-c2"></div>
-    <div class="dpp-b dpp-c3"></div>
-    <div class="dpp-b dpp-c4"></div>
-    <div class="dpp-fade-tb"></div>
-    <div class="dpp-fade"></div>
+_EMPTY_STATE_HTML = """
+<div style="display:flex;flex-direction:column;align-items:center;
+            justify-content:center;min-height:440px;">
+  <div style="opacity:0.18;margin-bottom:22px;">
+    <svg width="70" height="70" viewBox="0 0 70 70" fill="none">
+      <circle cx="35" cy="35" r="32" stroke="#94a3b8" stroke-width="1.5"/>
+      <path d="M18 35 Q18 20 35 20 Q52 20 52 35" stroke="#22d3ee" stroke-width="2.2"
+            fill="none" stroke-linecap="round"/>
+      <path d="M52 35 Q52 50 35 50 Q18 50 18 35" stroke="#a855f7" stroke-width="2.2"
+            fill="none" stroke-linecap="round"/>
+      <circle cx="35" cy="35" r="3.5" fill="#475569"/>
+    </svg>
   </div>
-
-  <!-- Hero title text -->
-  <div class="dpp-tp">
-    <div class="dpp-ey">Dark Proteome Pipeline</div>
-    <p class="dpp-h1">Illuminate the<br>
-      <span class="dpp-ac">dark proteome</span>
-    </p>
-    <p class="dpp-ds">
-      Automated structural and functional annotation for
-      uncharacterised microbial proteins — integrating five
-      complementary EBI REST APIs.
-    </p>
-    <div class="dpp-chips">
-      <span class="dpp-chip">InterProScan</span>
-      <span class="dpp-chip">BLASTp</span>
-      <span class="dpp-chip">FoldSeek</span>
-      <span class="dpp-chip">Phobius</span>
-      <span class="dpp-chip">HMMER</span>
-    </div>
-    <div class="dpp-hint">
-      <span class="dpp-arrow">&#8592;</span>
-      Upload a FASTA or PDB file to begin annotation
-    </div>
-  </div>
-
+  <p style="color:#334155;font-size:13px;text-align:center;
+            line-height:1.80;margin:0;max-width:220px;">
+    Upload a FASTA file in the left panel<br>then click
+    <span style="color:#3b82f6;font-weight:600;">Run Analysis</span>
+  </p>
 </div>
 """
 
@@ -3367,10 +3382,10 @@ with col_right:
         if _had_prior:
             st.info(
                 "**Results may have expired** — your session was reset. "
-                "Re-upload your files and click **Run Pipeline** to restore results from cache "
+                "Re-upload your files and click **Run Analysis** to restore results from cache "
                 "(if the same files were run before, they load instantly without re-running)."
             )
-        st.markdown(_HERO_HTML, unsafe_allow_html=True)
+        st.markdown(_EMPTY_STATE_HTML, unsafe_allow_html=True)
     else:
         if _res:
             n_ok    = sum(r["ok"] for r in _res.values())
@@ -3401,11 +3416,12 @@ with col_right:
                     use_container_width=True,
                 )
             with _clr_col:
-                if st.button("✕ Clear", help="Clear results and return to landing page",
+                if st.button("✕ Clear", help="Clear results and return to home",
                              use_container_width=True, key="clear_results"):
                     for _k in ["results", "fasta_text", "pdb_text",
                                "active_tools", "protein_name"]:
                         st.session_state.pop(_k, None)
+                    st.session_state["page"] = "landing"
                     st.rerun()
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
