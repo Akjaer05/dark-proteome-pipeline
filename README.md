@@ -3,7 +3,9 @@ title: Dark Proteome Pipeline
 emoji: 🧬
 colorFrom: blue
 colorTo: indigo
-sdk: docker
+sdk: streamlit
+sdk_version: 1.50.0
+app_file: dark_proteome_app.py
 pinned: false
 ---
 
