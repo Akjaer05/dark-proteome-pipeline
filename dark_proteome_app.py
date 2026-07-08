@@ -3150,147 +3150,208 @@ with col_left:
         unsafe_allow_html=True,
     )
 
-# ── Hero HTML (shown when no results have been loaded yet) ────────────────────
+# ── Hero markup (shown when no results have been loaded yet) ──────────────────
+# Rendered via st.markdown so it lives directly in Streamlit's DOM — no iframe,
+# no CDN dependency. The <style> block is injected into the page's stylesheet by
+# Streamlit's unsafe_allow_html rendering path, so @keyframes animations work.
 
-_HERO_HTML = """<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
+_HERO_HTML = """
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{
-  background:#050a15;
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-  overflow:hidden;height:520px
+/* Scoped with .dpp-hero prefix to avoid colliding with Streamlit's own CSS */
+.dpp-hero {
+  display: flex;
+  align-items: center;
+  min-height: 460px;
+  gap: 0;
+  position: relative;
+  overflow: hidden;
 }
-.hero{display:flex;height:520px;align-items:stretch;position:relative}
 
-/* ── Left: protein viewer ── */
-.vp{
-  position:relative;flex:0 0 52%;overflow:hidden;
+/* ── Left: animated protein-glow visual ── */
+.dpp-vp {
+  flex: 0 0 52%;
+  position: relative;
+  min-height: 460px;
+  overflow: hidden;
+}
+/* Soft ambient light behind the blobs */
+.dpp-vp-bg {
+  position: absolute; inset: 0;
   background:
-    radial-gradient(ellipse at 30% 55%,rgba(6,182,212,0.07) 0%,transparent 60%),
-    radial-gradient(ellipse at 70% 25%,rgba(139,92,246,0.06) 0%,transparent 55%),
-    radial-gradient(ellipse at 60% 80%,rgba(244,114,182,0.04) 0%,transparent 45%),
-    #050a15
+    radial-gradient(ellipse at 35% 50%, rgba(6,182,212,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse at 70% 25%, rgba(139,92,246,0.10) 0%, transparent 50%),
+    radial-gradient(ellipse at 55% 78%, rgba(244,114,182,0.08) 0%, transparent 45%);
 }
-#v{width:100%;height:100%}
-/* Fade right edge into text area */
-.vp::after{
-  content:'';position:absolute;top:0;right:0;bottom:0;width:160px;
-  background:linear-gradient(to right,transparent,#050a15);
-  pointer-events:none;z-index:2
+/* Individual glowing orbs */
+.dpp-b {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
 }
-/* Fade top/bottom edges */
-.vp::before{
-  content:'';position:absolute;inset:0;
-  background:linear-gradient(to bottom,#050a15 0%,transparent 12%,transparent 88%,#050a15 100%);
-  pointer-events:none;z-index:2
+.dpp-b1 { width:260px;height:260px;top:4%;left:3%;
+  background:radial-gradient(circle,rgba(6,182,212,0.60) 0%,transparent 68%);
+  filter:blur(36px); animation:dpp-f1 14s ease-in-out infinite; }
+.dpp-b2 { width:220px;height:220px;top:38%;left:28%;
+  background:radial-gradient(circle,rgba(139,92,246,0.55) 0%,transparent 68%);
+  filter:blur(30px); animation:dpp-f2 11s ease-in-out infinite 2s; }
+.dpp-b3 { width:200px;height:200px;top:18%;left:50%;
+  background:radial-gradient(circle,rgba(244,114,182,0.50) 0%,transparent 68%);
+  filter:blur(28px); animation:dpp-f3 13s ease-in-out infinite 4s; }
+.dpp-b4 { width:170px;height:170px;top:60%;left:6%;
+  background:radial-gradient(circle,rgba(16,185,129,0.45) 0%,transparent 68%);
+  filter:blur(24px); animation:dpp-f4 15s ease-in-out infinite 1s; }
+.dpp-b5 { width:140px;height:140px;top:66%;left:58%;
+  background:radial-gradient(circle,rgba(245,158,11,0.45) 0%,transparent 68%);
+  filter:blur(20px); animation:dpp-f5 10s ease-in-out infinite 3s; }
+/* Bright tight cores give the fluorescent-microscopy look */
+.dpp-c1 { width:68px;height:68px;top:18%;left:17%;
+  background:radial-gradient(circle,rgba(34,211,238,0.90) 0%,transparent 60%);
+  filter:blur(7px); animation:dpp-f1 14s ease-in-out infinite 0.5s; }
+.dpp-c2 { width:52px;height:52px;top:50%;left:42%;
+  background:radial-gradient(circle,rgba(196,181,253,0.95) 0%,transparent 60%);
+  filter:blur(5px); animation:dpp-f2 11s ease-in-out infinite 3s; }
+.dpp-c3 { width:60px;height:60px;top:28%;left:64%;
+  background:radial-gradient(circle,rgba(251,114,182,0.90) 0%,transparent 60%);
+  filter:blur(6px); animation:dpp-f3 13s ease-in-out infinite 5s; }
+.dpp-c4 { width:46px;height:46px;top:73%;left:22%;
+  background:radial-gradient(circle,rgba(52,211,153,0.85) 0%,transparent 60%);
+  filter:blur(5px); animation:dpp-f4 15s ease-in-out infinite 2s; }
+/* Right-edge gradient fade into dark background */
+.dpp-fade {
+  position: absolute; top:0; right:0; bottom:0; width:130px;
+  background: linear-gradient(to right, transparent, #0a0e1a);
+  pointer-events: none;
 }
+/* Top/bottom fades */
+.dpp-fade-tb {
+  position: absolute; inset:0;
+  background: linear-gradient(to bottom,
+    #0a0e1a 0%, transparent 10%,
+    transparent 90%, #0a0e1a 100%);
+  pointer-events: none;
+}
+@keyframes dpp-f1{0%,100%{transform:translate(0,0)scale(1)}33%{transform:translate(22px,-28px)scale(1.08)}66%{transform:translate(-18px,18px)scale(0.95)}}
+@keyframes dpp-f2{0%,100%{transform:translate(0,0)scale(1)}25%{transform:translate(-28px,22px)scale(1.06)}75%{transform:translate(18px,-18px)scale(0.94)}}
+@keyframes dpp-f3{0%,100%{transform:translate(0,0)scale(1)}40%{transform:translate(18px,28px)scale(1.07)}80%{transform:translate(-22px,-14px)scale(0.96)}}
+@keyframes dpp-f4{0%,100%{transform:translate(0,0)scale(1)}50%{transform:translate(28px,-22px)scale(1.09)}}
+@keyframes dpp-f5{0%,100%{transform:translate(0,0)scale(1)}60%{transform:translate(-18px,18px)scale(1.05)}}
 
-/* ── Right: text ── */
-.tp{
-  flex:0 0 48%;padding:0 24px 0 8px;
-  display:flex;flex-direction:column;justify-content:center
+/* ── Right: title text ── */
+.dpp-tp {
+  flex: 0 0 48%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 16px 0 8px;
 }
-.ey{
-  font-size:9px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;
-  color:#3b82f6;margin-bottom:20px;display:flex;align-items:center;gap:10px
+.dpp-ey {
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.22em !important;
+  text-transform: uppercase !important;
+  color: #3b82f6 !important;
+  margin-bottom: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
 }
-.ey::before{content:'';width:22px;height:1px;background:#3b82f6;flex-shrink:0}
-h1{
-  font-size:36px;font-weight:800;line-height:1.1;
-  color:#e2e8f0;margin-bottom:14px;letter-spacing:-.02em
+.dpp-ey::before {
+  content: '';
+  display: inline-block;
+  width: 22px; height: 1px;
+  background: #3b82f6;
+  flex-shrink: 0;
 }
-.ac{
-  background:linear-gradient(125deg,#22d3ee 0%,#818cf8 55%,#f472b6 100%);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text
+.dpp-h1 {
+  font-size: 36px !important;
+  font-weight: 800 !important;
+  line-height: 1.1 !important;
+  color: #e2e8f0 !important;
+  margin: 0 0 14px !important;
+  letter-spacing: -0.02em !important;
 }
-.ds{
-  font-size:13px;line-height:1.72;color:#475569;
-  margin-bottom:26px;max-width:305px
+.dpp-ac {
+  background: linear-gradient(125deg, #22d3ee 0%, #818cf8 55%, #f472b6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
-.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:30px}
-.chip{
-  background:rgba(15,23,42,.95);border:1px solid rgba(51,65,85,.6);border-radius:20px;
-  padding:3px 11px;font-size:10px;color:#475569;font-weight:500;letter-spacing:.02em
+.dpp-ds {
+  font-size: 13px !important;
+  line-height: 1.72 !important;
+  color: #475569 !important;
+  margin: 0 0 26px !important;
+  max-width: 300px !important;
 }
-.ht{font-size:11px;color:#1e3a5f;display:flex;align-items:center;gap:7px}
-.arrow{color:#3b82f6;font-size:13px;display:inline-block}
-/* Loading pulse */
-.ln{
-  position:absolute;bottom:14px;left:16px;font-size:9px;color:#1e3850;
-  letter-spacing:.07em;z-index:5;animation:p 2s ease-in-out infinite
+.dpp-chips {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  margin-bottom: 28px !important;
 }
-@keyframes p{0%,100%{opacity:.4}50%{opacity:.9}}
+.dpp-chip {
+  background: rgba(15,23,42,0.95) !important;
+  border: 1px solid rgba(51,65,85,0.65) !important;
+  border-radius: 20px !important;
+  padding: 3px 11px !important;
+  font-size: 10px !important;
+  color: #475569 !important;
+  font-weight: 500 !important;
+}
+.dpp-hint {
+  font-size: 11px !important;
+  color: #1e3a5f !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+}
+.dpp-arrow { color: #3b82f6 !important; font-size: 14px !important; }
 </style>
-</head>
-<body>
-<div class="hero">
 
-  <!-- protein viewer -->
-  <div class="vp">
-    <div id="v"></div>
-    <div class="ln">Loading structure — GroEL chaperonin (1AON, E. coli)…</div>
+<div class="dpp-hero">
+
+  <!-- Animated protein glow visual -->
+  <div class="dpp-vp">
+    <div class="dpp-vp-bg"></div>
+    <div class="dpp-b dpp-b1"></div>
+    <div class="dpp-b dpp-b2"></div>
+    <div class="dpp-b dpp-b3"></div>
+    <div class="dpp-b dpp-b4"></div>
+    <div class="dpp-b dpp-b5"></div>
+    <div class="dpp-b dpp-c1"></div>
+    <div class="dpp-b dpp-c2"></div>
+    <div class="dpp-b dpp-c3"></div>
+    <div class="dpp-b dpp-c4"></div>
+    <div class="dpp-fade-tb"></div>
+    <div class="dpp-fade"></div>
   </div>
 
-  <!-- title text -->
-  <div class="tp">
-    <div class="ey">Dark Proteome Pipeline</div>
-    <h1>Illuminate the<br><span class="ac">dark proteome</span></h1>
-    <p class="ds">
+  <!-- Hero title text -->
+  <div class="dpp-tp">
+    <div class="dpp-ey">Dark Proteome Pipeline</div>
+    <p class="dpp-h1">Illuminate the<br>
+      <span class="dpp-ac">dark proteome</span>
+    </p>
+    <p class="dpp-ds">
       Automated structural and functional annotation for
       uncharacterised microbial proteins — integrating five
       complementary EBI REST APIs.
     </p>
-    <div class="chips">
-      <span class="chip">InterProScan</span>
-      <span class="chip">BLASTp</span>
-      <span class="chip">FoldSeek</span>
-      <span class="chip">Phobius</span>
-      <span class="chip">HMMER</span>
+    <div class="dpp-chips">
+      <span class="dpp-chip">InterProScan</span>
+      <span class="dpp-chip">BLASTp</span>
+      <span class="dpp-chip">FoldSeek</span>
+      <span class="dpp-chip">Phobius</span>
+      <span class="dpp-chip">HMMER</span>
     </div>
-    <div class="ht">
-      <span class="arrow">&#8592;</span>
+    <div class="dpp-hint">
+      <span class="dpp-arrow">&#8592;</span>
       Upload a FASTA or PDB file to begin annotation
     </div>
   </div>
 
 </div>
-<script src="https://3Dmol.org/build/3Dmol-min.js"></script>
-<script>
-(function () {
-  var el = document.getElementById("v");
-  var viewer = $3Dmol.createViewer(el, {backgroundColor: "#050a15"});
-
-  // 1AON: GroEL-GroES chaperonin complex (E. coli) — 14-subunit double ring
-  // Two rings of 7 coloured with vivid complementary hues
-  var palette = {
-    "A":"#06b6d4","B":"#a78bfa","C":"#f472b6","D":"#34d399",
-    "E":"#fbbf24","F":"#60a5fa","G":"#f87171",
-    "H":"#22d3ee","I":"#8b5cf6","J":"#ec4899","K":"#10b981",
-    "L":"#f59e0b","M":"#3b82f6","N":"#ef4444"
-  };
-
-  $3Dmol.download("pdb:1AON", viewer, {}, function () {
-    Object.keys(palette).forEach(function (chain) {
-      viewer.setStyle(
-        {chain: chain},
-        {cartoon: {color: palette[chain], opacity: 1}}
-      );
-    });
-    // Hide ligands / water
-    viewer.setStyle({hetflag: true}, {});
-    viewer.spin("y", 0.5);
-    viewer.zoomTo();
-    viewer.render();
-    var ln = document.querySelector(".ln");
-    if (ln) ln.style.display = "none";
-  });
-})();
-</script>
-</body>
-</html>"""
+"""
 
 # ── Right panel — results ──────────────────────────────────────────────────────
 
@@ -3310,7 +3371,7 @@ with col_right:
                 "Re-upload your files and click **Run Pipeline** to restore results from cache "
                 "(if the same files were run before, they load instantly without re-running)."
             )
-        components.html(_HERO_HTML, height=520, scrolling=False)
+        st.markdown(_HERO_HTML, unsafe_allow_html=True)
     else:
         if _res:
             n_ok    = sum(r["ok"] for r in _res.values())
