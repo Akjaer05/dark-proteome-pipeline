@@ -3207,7 +3207,9 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
 
 /* ── Left: 3Dmol protein viewer ── */
 .hero-left{flex:0 0 52%;position:relative;background:#0a0e1a;overflow:hidden;}
-#mol-viewer{width:100%;height:100%;position:relative;}
+/* fb is always visible (z-index 0); mol-viewer canvas (z-index 2) overlays it when 3Dmol loads */
+.fb{display:block;position:absolute;inset:0;overflow:hidden;z-index:0;}
+#mol-viewer{position:absolute;inset:0;z-index:2;}
 .vload{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   background:#0a0e1a;z-index:10;transition:opacity 1s ease;
@@ -3219,10 +3221,6 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
   animation:spin-ring 1s linear infinite;
 }
 @keyframes spin-ring{to{transform:rotate(360deg)}}
-
-/* ── CSS fallback visualization (shown when 3Dmol CDN fails) ── */
-.fb{display:none;position:absolute;inset:0;overflow:hidden;}
-.fb.on{display:block;}
 .fb-hx{position:absolute;border-radius:50%;pointer-events:none;}
 .fb-hx1{width:380px;height:52px;top:9%;left:2%;
   background:linear-gradient(135deg,transparent 0%,rgba(6,182,212,.5) 18%,rgba(34,211,238,1) 50%,rgba(6,182,212,.5) 82%,transparent 100%);
@@ -3383,13 +3381,17 @@ document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='0';e.sty
   ];
   var idx=0;
 
-  function showFallback(){
-    var vl=document.getElementById('vload');if(vl)vl.style.opacity='0';
-    var fb=document.getElementById('fb');if(fb)fb.classList.add('on');
+  /* fb is always visible behind the spinner; just hide the spinner to reveal it */
+  function hideSpin(){
+    var vl=document.getElementById('vload');
+    if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},1100);}
   }
 
-  function initViewer(){
-    if(typeof $3Dmol==='undefined'){setTimeout(initViewer,80);return;}
+  function initViewer(n){
+    n=n||0;
+    /* give up after ~8 s of polling — spinner hidden by the 5 s text timer anyway */
+    if(n>100){hideSpin();return;}
+    if(typeof $3Dmol==='undefined'){setTimeout(function(){initViewer(n+1);},80);return;}
     try{
       var container=document.getElementById('mol-viewer');
       var viewer=$3Dmol.createViewer(container,{
@@ -3401,13 +3403,12 @@ document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='0';e.sty
       viewer.zoom(0.88);
       viewer.spin('y',0.8);
       viewer.render();
-      var vl=document.getElementById('vload');
-      if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},1100);}
-    }catch(e){showFallback();}
+      hideSpin();
+    }catch(e){hideSpin();}
   }
 
   function tryNext(){
-    if(idx>=cdns.length){showFallback();return;}
+    if(idx>=cdns.length){hideSpin();return;}
     var s=document.createElement('script');
     s.src=cdns[idx++];
     s.onload=function(){setTimeout(initViewer,60);};
