@@ -4,11 +4,14 @@ Run:  streamlit run dark_proteome_app.py
 """
 
 import base64
+import hashlib
 import html as _html
 import io
 import json
 import math
 import os
+import pathlib
+import pickle
 import tarfile
 import tempfile
 import time
@@ -27,6 +30,82 @@ from dotenv import load_dotenv
 load_dotenv()
 EMAIL  = os.environ.get("EBI_EMAIL", "")
 GITHUB = "https://github.com/Akjaer05/dark-proteome-pipeline"
+
+# ── Result persistence helpers ─────────────────────────────────────────────────
+
+_CACHE_DIR = pathlib.Path(tempfile.gettempdir())
+
+
+def _cache_key(fasta_text, pdb_text) -> str:
+    payload = ((fasta_text or "") + "|||" + (pdb_text or "")).encode()
+    return hashlib.md5(payload).hexdigest()[:14]
+
+
+def _cache_path(fasta_text, pdb_text) -> pathlib.Path:
+    return _CACHE_DIR / f"dpp_{_cache_key(fasta_text, pdb_text)}.pkl"
+
+
+def _save_cache(fasta_text, pdb_text, results: dict, active_tools: list) -> None:
+    try:
+        payload = {
+            "results":      results,
+            "fasta_text":   fasta_text,
+            "pdb_text":     pdb_text,
+            "active_tools": active_tools,
+        }
+        _cache_path(fasta_text, pdb_text).write_bytes(pickle.dumps(payload))
+    except Exception:
+        pass  # cache failure is never fatal
+
+
+def _load_cache(fasta_text, pdb_text):
+    try:
+        p = _cache_path(fasta_text, pdb_text)
+        if p.exists():
+            return pickle.loads(p.read_bytes())
+    except Exception:
+        pass
+    return None
+
+
+def _extract_protein_name(fasta_text: str) -> str:
+    if not fasta_text:
+        return "protein"
+    for line in fasta_text.splitlines():
+        if line.startswith(">"):
+            first = line[1:].strip().split()[0] if line[1:].strip() else ""
+            return first or "protein"
+    return "protein"
+
+
+def _results_to_json_bytes(results: dict, protein_name: str = "protein") -> bytes:
+    """Serialise pipeline results to JSON bytes for download.
+    FoldSeek tar.gz bytes are base64-encoded; everything else is JSON-native."""
+    out: dict = {}
+    for tool, r in results.items():
+        entry: dict = {"ok": r["ok"]}
+        if not r["ok"]:
+            entry["error"] = r.get("error", "")
+        else:
+            d = r.get("data")
+            if isinstance(d, bytes):
+                entry["data"]     = base64.b64encode(d).decode()
+                entry["encoding"] = "base64"
+            else:
+                try:
+                    json.dumps(d)
+                    entry["data"] = d
+                except (TypeError, ValueError):
+                    entry["data"]      = str(d)[:2000]
+                    entry["truncated"] = True
+        out[tool] = entry
+    return json.dumps({
+        "schema":      "dark-proteome-pipeline/v1",
+        "protein":     protein_name,
+        "exported_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "results":     out,
+    }, indent=2).encode()
+
 
 # ── Page config ────────────────────────────────────────────────────────────────
 
@@ -2959,6 +3038,20 @@ with col_left:
             fasta_text = fasta_file.read().decode() if fasta_file else None
             pdb_text   = pdb_file.read().decode()   if pdb_file   else None
 
+            # ── Cache check: same files → load instantly without re-running ──
+            _cached = _load_cache(fasta_text, pdb_text)
+            if _cached:
+                st.success(
+                    "✅ Results restored from cache — same files were run previously. "
+                    "To force a fresh run, clear the upload and re-upload your files."
+                )
+                st.session_state["results"]      = _cached["results"]
+                st.session_state["fasta_text"]   = _cached["fasta_text"]
+                st.session_state["pdb_text"]     = _cached["pdb_text"]
+                st.session_state["active_tools"] = _cached["active_tools"]
+                st.session_state["protein_name"] = _extract_protein_name(fasta_text)
+                st.rerun()
+
             tasks: dict = {}
             if fasta_text:
                 tasks["InterProScan"] = (run_interproscan, fasta_text)
@@ -2969,10 +3062,17 @@ with col_left:
                 tasks["FoldSeek"]     = (run_foldseek,      pdb_text)
 
             n_tasks = len(tasks)
+            _protein_name = _extract_protein_name(fasta_text)
             st.session_state["active_tools"] = list(tasks.keys())
+            st.session_state["protein_name"] = _protein_name
+            # Seed session state immediately so partial results appear on refresh
+            st.session_state["results"]    = {}
+            st.session_state["fasta_text"] = fasta_text
+            st.session_state["pdb_text"]   = pdb_text
 
             results: dict = {}
             _pipeline_start = time.time()
+            _start_str = time.strftime("%H:%M:%S")
             print(f"[PIPELINE] Starting {n_tasks} tools sequentially: {list(tasks.keys())}", flush=True)
 
             # Run sequentially — avoids OOM and thread contention on free-tier cloud.
@@ -2981,8 +3081,13 @@ with col_left:
                 f"Running {n_tasks} tool{'s' if n_tasks != 1 else ''} — this takes 8–15 minutes…",
                 expanded=True,
             ) as _status_box:
+                st.write(f"🕐 Pipeline started at **{_start_str}** — keep this tab open")
                 for idx, (name, (fn, arg)) in enumerate(tasks.items(), 1):
-                    st.write(f"⏳  [{idx}/{n_tasks}]  **{name}** — running…")
+                    _pipeline_elapsed = int(time.time() - _pipeline_start)
+                    st.write(
+                        f"⏳  [{idx}/{n_tasks}]  **{name}** — running…"
+                        f"  _(+{_pipeline_elapsed}s  |  {time.strftime('%H:%M:%S')})_"
+                    )
                     if name == "BLASTp":
                         st.info(
                             "BLASTp can take 10–15 minutes from cloud servers — this is normal."
@@ -2993,20 +3098,27 @@ with col_left:
                         data = fn(arg)
                         results[name] = {"ok": True, "data": data}
                         _elapsed = round(time.time() - _t0, 1)
-                        st.write(f"✅  [{idx}/{n_tasks}]  **{name}** — done in {_elapsed}s")
+                        _total_so_far = int(time.time() - _pipeline_start)
+                        st.write(
+                            f"✅  [{idx}/{n_tasks}]  **{name}** — done in {_elapsed}s"
+                            f"  _(pipeline total: {_total_so_far}s)_"
+                        )
                         print(f"[PIPELINE] {name} done in {_elapsed}s", flush=True)
                     except Exception as _exc:
                         results[name] = {"ok": False, "error": str(_exc)}
                         _elapsed = round(time.time() - _t0, 1)
                         st.write(f"❌  [{idx}/{n_tasks}]  **{name}** — failed: {_exc}")
                         print(f"[PIPELINE] {name} FAILED in {_elapsed}s — {_exc}", flush=True)
+                    # Write partial results to session_state after every tool so that
+                    # a browser refresh mid-pipeline shows whatever completed so far.
+                    st.session_state["results"] = dict(results)
 
                 _total   = round(time.time() - _pipeline_start, 1)
                 _n_ok    = sum(1 for r in results.values() if r["ok"])
                 _all_ok  = _n_ok == n_tasks
                 _status_box.update(
                     label=(f"{'All' if _all_ok else f'{_n_ok}/{n_tasks}'} tools completed"
-                           f" — {_total}s total"),
+                           f" — {_total}s total (started {_start_str})"),
                     state="complete" if _all_ok else "error",
                 )
                 print(f"[PIPELINE] All done in {_total}s — "
@@ -3016,6 +3128,9 @@ with col_left:
             st.session_state["results"]    = results
             st.session_state["fasta_text"] = fasta_text
             st.session_state["pdb_text"]   = pdb_text
+
+            # Save to disk — same files will reload instantly even after a server restart.
+            _save_cache(fasta_text, pdb_text, results, list(tasks.keys()))
 
         except Exception as _pipeline_crash:
             import traceback as _tb
@@ -3045,10 +3160,17 @@ with col_right:
     _fasta_ss = st.session_state.get("fasta_text")
 
     if not _res and not _pdb_ss:
-        # Empty-state placeholder
+        # Empty-state placeholder — also shown when a session expires and results are lost
+        _had_prior = bool(st.session_state.get("active_tools"))
+        if _had_prior:
+            st.info(
+                "**Results may have expired** — your session was reset. "
+                "Re-upload your files and click **Run Pipeline** to restore results from cache "
+                "(if the same files were run before, they load instantly without re-running)."
+            )
         st.markdown("""
         <div style="display:flex;flex-direction:column;align-items:center;
-                    justify-content:center;min-height:360px;gap:14px;opacity:0.55;">
+                    justify-content:center;min-height:320px;gap:14px;opacity:0.55;">
           <div style="width:52px;height:52px;background:#080c17;border:1px solid #1e2d4a;
                       border-radius:14px;display:flex;align-items:center;
                       justify-content:center;">
@@ -3067,6 +3189,9 @@ with col_right:
             <p style="color:#1e2d4a;font-size:12px;margin:0;">
               Upload a FASTA file and click Run Pipeline to begin annotation
             </p>
+            <p style="color:#1e2d4a;font-size:11px;margin:6px 0 0;">
+              Re-uploading the same files restores previous results instantly
+            </p>
           </div>
         </div>
         """, unsafe_allow_html=True)
@@ -3078,13 +3203,29 @@ with col_right:
             bar_col = "#22c55e" if all_ok else "#f59e0b"
             bar_bg  = "rgba(34,197,94,0.06)"  if all_ok else "rgba(245,158,11,0.06)"
             bar_bdr = "rgba(34,197,94,0.15)"  if all_ok else "rgba(245,158,11,0.15)"
-            st.markdown(
-                f'<div style="background:{bar_bg};border:1px solid {bar_bdr};border-radius:8px;'
-                f'padding:10px 16px;margin-bottom:18px;display:flex;align-items:center;gap:8px;">'
-                f'<span style="color:{bar_col};font-size:12.5px;font-weight:600;">'
-                f'&#x2714;&ensp;{n_ok}/{n_total} tools completed</span></div>',
-                unsafe_allow_html=True,
-            )
+
+            _summary_col, _dl_col = st.columns([3, 1])
+            with _summary_col:
+                st.markdown(
+                    f'<div style="background:{bar_bg};border:1px solid {bar_bdr};border-radius:8px;'
+                    f'padding:10px 16px;display:flex;align-items:center;gap:8px;">'
+                    f'<span style="color:{bar_col};font-size:12.5px;font-weight:600;">'
+                    f'&#x2714;&ensp;{n_ok}/{n_total} tools completed</span></div>',
+                    unsafe_allow_html=True,
+                )
+            with _dl_col:
+                _pname = st.session_state.get("protein_name", "protein")
+                _fname = f"dpp_{_pname}_{time.strftime('%Y%m%d_%H%M%S')}.json"
+                st.download_button(
+                    label="⬇ Download JSON",
+                    data=_results_to_json_bytes(_res, _pname),
+                    file_name=_fname,
+                    mime="application/json",
+                    help="Save all results locally before the session expires",
+                    use_container_width=True,
+                )
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
             # Inline error banners for failed tools — full error text, always visible
             for name in _active:
                 r = _res.get(name)
