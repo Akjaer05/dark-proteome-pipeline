@@ -23,8 +23,11 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 from Bio.PDB import PDBParser, PDBIO
-from Bio.PDB.DSSP import DSSP
 from Bio.SeqUtils.ProtParam import ProteinAnalysis
+try:
+    from Bio.PDB.DSSP import DSSP as _DSSP
+except Exception:
+    _DSSP = None
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1104,7 +1107,9 @@ def _run_dssp_raw(pdb_text: str):
     try:
         for exe in ("mkdssp", "dssp"):
             try:
-                dssp_obj = DSSP(model, tmppath, dssp=exe)
+                if _DSSP is None:
+                    continue
+                dssp_obj = _DSSP(model, tmppath, dssp=exe)
                 return [dssp_obj[k][2] for k in dssp_obj]
             except Exception:
                 continue
