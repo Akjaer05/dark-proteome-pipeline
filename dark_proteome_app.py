@@ -3355,15 +3355,20 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
   </div>
 </div>
 
-<!-- Pre-hide text; fallback timer reveals everything if CDNs fail -->
+<!-- Pre-hide text elements; two independent timers — text fallback + spinner hide -->
 <script>
+/* _fb: text/chip fallback — cleared when Anime.js loads */
 var _fb=setTimeout(function(){
   ['#badge','#t1','#t2','#desc'].forEach(function(s){
     var e=document.querySelector(s);if(e){e.style.opacity='1';e.style.transform='none';}
   });
   document.querySelectorAll('.chip,.dpp-char').forEach(function(e){e.style.opacity='1';e.style.transform='none';});
-  var vl=document.getElementById('vload');if(vl)vl.style.opacity='0';
 },5000);
+/* _spinHide: always hides the spinner after 4 s regardless of Anime.js / 3Dmol status */
+var _spinHide=setTimeout(function(){
+  var vl=document.getElementById('vload');
+  if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},900);}
+},4000);
 ['#badge','#t2','#desc'].forEach(function(s){
   var e=document.querySelector(s);if(e)e.style.opacity='0';
 });
@@ -3383,6 +3388,7 @@ document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='0';e.sty
 
   /* fb is always visible behind the spinner; just hide the spinner to reveal it */
   function hideSpin(){
+    clearTimeout(_spinHide);
     var vl=document.getElementById('vload');
     if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},1100);}
   }
