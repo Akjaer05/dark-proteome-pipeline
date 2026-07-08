@@ -3150,6 +3150,148 @@ with col_left:
         unsafe_allow_html=True,
     )
 
+# ── Hero HTML (shown when no results have been loaded yet) ────────────────────
+
+_HERO_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:#050a15;
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  overflow:hidden;height:520px
+}
+.hero{display:flex;height:520px;align-items:stretch;position:relative}
+
+/* ── Left: protein viewer ── */
+.vp{
+  position:relative;flex:0 0 52%;overflow:hidden;
+  background:
+    radial-gradient(ellipse at 30% 55%,rgba(6,182,212,0.07) 0%,transparent 60%),
+    radial-gradient(ellipse at 70% 25%,rgba(139,92,246,0.06) 0%,transparent 55%),
+    radial-gradient(ellipse at 60% 80%,rgba(244,114,182,0.04) 0%,transparent 45%),
+    #050a15
+}
+#v{width:100%;height:100%}
+/* Fade right edge into text area */
+.vp::after{
+  content:'';position:absolute;top:0;right:0;bottom:0;width:160px;
+  background:linear-gradient(to right,transparent,#050a15);
+  pointer-events:none;z-index:2
+}
+/* Fade top/bottom edges */
+.vp::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(to bottom,#050a15 0%,transparent 12%,transparent 88%,#050a15 100%);
+  pointer-events:none;z-index:2
+}
+
+/* ── Right: text ── */
+.tp{
+  flex:0 0 48%;padding:0 24px 0 8px;
+  display:flex;flex-direction:column;justify-content:center
+}
+.ey{
+  font-size:9px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;
+  color:#3b82f6;margin-bottom:20px;display:flex;align-items:center;gap:10px
+}
+.ey::before{content:'';width:22px;height:1px;background:#3b82f6;flex-shrink:0}
+h1{
+  font-size:36px;font-weight:800;line-height:1.1;
+  color:#e2e8f0;margin-bottom:14px;letter-spacing:-.02em
+}
+.ac{
+  background:linear-gradient(125deg,#22d3ee 0%,#818cf8 55%,#f472b6 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text
+}
+.ds{
+  font-size:13px;line-height:1.72;color:#475569;
+  margin-bottom:26px;max-width:305px
+}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:30px}
+.chip{
+  background:rgba(15,23,42,.95);border:1px solid rgba(51,65,85,.6);border-radius:20px;
+  padding:3px 11px;font-size:10px;color:#475569;font-weight:500;letter-spacing:.02em
+}
+.ht{font-size:11px;color:#1e3a5f;display:flex;align-items:center;gap:7px}
+.arrow{color:#3b82f6;font-size:13px;display:inline-block}
+/* Loading pulse */
+.ln{
+  position:absolute;bottom:14px;left:16px;font-size:9px;color:#1e3850;
+  letter-spacing:.07em;z-index:5;animation:p 2s ease-in-out infinite
+}
+@keyframes p{0%,100%{opacity:.4}50%{opacity:.9}}
+</style>
+</head>
+<body>
+<div class="hero">
+
+  <!-- protein viewer -->
+  <div class="vp">
+    <div id="v"></div>
+    <div class="ln">Loading structure — GroEL chaperonin (1AON, E. coli)…</div>
+  </div>
+
+  <!-- title text -->
+  <div class="tp">
+    <div class="ey">Dark Proteome Pipeline</div>
+    <h1>Illuminate the<br><span class="ac">dark proteome</span></h1>
+    <p class="ds">
+      Automated structural and functional annotation for
+      uncharacterised microbial proteins — integrating five
+      complementary EBI REST APIs.
+    </p>
+    <div class="chips">
+      <span class="chip">InterProScan</span>
+      <span class="chip">BLASTp</span>
+      <span class="chip">FoldSeek</span>
+      <span class="chip">Phobius</span>
+      <span class="chip">HMMER</span>
+    </div>
+    <div class="ht">
+      <span class="arrow">&#8592;</span>
+      Upload a FASTA or PDB file to begin annotation
+    </div>
+  </div>
+
+</div>
+<script src="https://3Dmol.org/build/3Dmol-min.js"></script>
+<script>
+(function () {
+  var el = document.getElementById("v");
+  var viewer = $3Dmol.createViewer(el, {backgroundColor: "#050a15"});
+
+  // 1AON: GroEL-GroES chaperonin complex (E. coli) — 14-subunit double ring
+  // Two rings of 7 coloured with vivid complementary hues
+  var palette = {
+    "A":"#06b6d4","B":"#a78bfa","C":"#f472b6","D":"#34d399",
+    "E":"#fbbf24","F":"#60a5fa","G":"#f87171",
+    "H":"#22d3ee","I":"#8b5cf6","J":"#ec4899","K":"#10b981",
+    "L":"#f59e0b","M":"#3b82f6","N":"#ef4444"
+  };
+
+  $3Dmol.download("pdb:1AON", viewer, {}, function () {
+    Object.keys(palette).forEach(function (chain) {
+      viewer.setStyle(
+        {chain: chain},
+        {cartoon: {color: palette[chain], opacity: 1}}
+      );
+    });
+    // Hide ligands / water
+    viewer.setStyle({hetflag: true}, {});
+    viewer.spin("y", 0.5);
+    viewer.zoomTo();
+    viewer.render();
+    var ln = document.querySelector(".ln");
+    if (ln) ln.style.display = "none";
+  });
+})();
+</script>
+</body>
+</html>"""
+
 # ── Right panel — results ──────────────────────────────────────────────────────
 
 with col_right:
@@ -3168,33 +3310,7 @@ with col_right:
                 "Re-upload your files and click **Run Pipeline** to restore results from cache "
                 "(if the same files were run before, they load instantly without re-running)."
             )
-        st.markdown("""
-        <div style="display:flex;flex-direction:column;align-items:center;
-                    justify-content:center;min-height:320px;gap:14px;opacity:0.55;">
-          <div style="width:52px;height:52px;background:#080c17;border:1px solid #1e2d4a;
-                      border-radius:14px;display:flex;align-items:center;
-                      justify-content:center;">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-                 stroke="#1e2d4a" stroke-width="1.8"
-                 stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-          </div>
-          <div style="text-align:center;">
-            <p style="color:#334155;font-size:14px;font-weight:500;margin:0 0 4px;">
-              No results yet
-            </p>
-            <p style="color:#1e2d4a;font-size:12px;margin:0;">
-              Upload a FASTA file and click Run Pipeline to begin annotation
-            </p>
-            <p style="color:#1e2d4a;font-size:11px;margin:6px 0 0;">
-              Re-uploading the same files restores previous results instantly
-            </p>
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
+        components.html(_HERO_HTML, height=520, scrolling=False)
     else:
         if _res:
             n_ok    = sum(r["ok"] for r in _res.values())
