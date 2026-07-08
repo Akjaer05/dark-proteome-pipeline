@@ -3195,7 +3195,9 @@ in one pipeline.</p>
 
 # ── Landing hero: 3Dmol viewer + Anime.js text (template; __VASE_B64__ filled at runtime) ──
 
-_LANDING_HERO_TEMPLATE = """<!DOCTYPE html>
+# ── Landing hero (CSS protein visualization + Anime.js text) ─────────────────
+
+_LANDING_IFRAME_HTML = """<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -3205,72 +3207,73 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;}
 .hero{display:flex;width:100%;height:100%;}
 
-/* ── Left: 3Dmol protein viewer ── */
-.hero-left{flex:0 0 52%;position:relative;background:#0a0e1a;overflow:hidden;}
-/* fb is always visible (z-index 0); mol-viewer canvas (z-index 2) overlays it when 3Dmol loads */
-.fb{display:block;position:absolute;inset:0;overflow:hidden;z-index:0;}
-#mol-viewer{position:absolute;inset:0;z-index:2;}
-.vload{
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  background:#0a0e1a;z-index:10;transition:opacity 1s ease;
+/* ── Left: animated protein secondary-structure visualization ── */
+.lvis{
+  flex:0 0 52%;position:relative;overflow:hidden;
+  background:radial-gradient(ellipse at 38% 50%,#0d1e3a 0%,#06090f 75%);
 }
-.vload-ring{
-  width:36px;height:36px;border-radius:50%;
-  border:2px solid rgba(34,211,238,0.15);
-  border-top-color:#22d3ee;
-  animation:spin-ring 1s linear infinite;
+.lbg{
+  position:absolute;inset:0;
+  background:
+    radial-gradient(ellipse at 38% 42%,rgba(6,182,212,.22) 0%,transparent 52%),
+    radial-gradient(ellipse at 62% 22%,rgba(139,92,246,.18) 0%,transparent 46%),
+    radial-gradient(ellipse at 28% 74%,rgba(244,114,182,.14) 0%,transparent 42%),
+    radial-gradient(ellipse at 72% 72%,rgba(16,185,129,.12) 0%,transparent 40%);
 }
-@keyframes spin-ring{to{transform:rotate(360deg)}}
-.fb-hx{position:absolute;border-radius:50%;pointer-events:none;}
-.fb-hx1{width:380px;height:52px;top:9%;left:2%;
+.hx{position:absolute;border-radius:50%;pointer-events:none;}
+.hx1{width:380px;height:54px;top:9%;left:2%;
   background:linear-gradient(135deg,transparent 0%,rgba(6,182,212,.5) 18%,rgba(34,211,238,1) 50%,rgba(6,182,212,.5) 82%,transparent 100%);
   transform:rotate(-22deg);
   box-shadow:0 0 36px rgba(34,211,238,.9),0 0 72px rgba(6,182,212,.5),0 0 120px rgba(6,182,212,.2);
-  animation:fbhx1 13s ease-in-out infinite;}
-.fb-hx2{width:300px;height:46px;top:44%;left:16%;
+  animation:hx1a 13s ease-in-out infinite;}
+.hx2{width:295px;height:48px;top:44%;left:16%;
   background:linear-gradient(135deg,transparent 0%,rgba(244,114,182,.5) 18%,rgba(251,113,133,1) 50%,rgba(244,114,182,.5) 82%,transparent 100%);
   transform:rotate(14deg);
-  box-shadow:0 0 30px rgba(251,113,133,.9),0 0 62px rgba(244,114,182,.5),0 0 105px rgba(244,114,182,.2);
-  animation:fbhx2 16s ease-in-out infinite 2s;}
-.fb-hx3{width:230px;height:42px;top:21%;left:47%;
+  box-shadow:0 0 30px rgba(251,113,133,.9),0 0 60px rgba(244,114,182,.5),0 0 100px rgba(244,114,182,.2);
+  animation:hx2a 16s ease-in-out infinite 2s;}
+.hx3{width:225px;height:42px;top:21%;left:46%;
   background:linear-gradient(135deg,transparent 0%,rgba(52,211,153,.5) 18%,rgba(110,231,183,1) 50%,rgba(52,211,153,.5) 82%,transparent 100%);
   transform:rotate(-36deg);
   box-shadow:0 0 26px rgba(110,231,183,.88),0 0 52px rgba(52,211,153,.46);
-  animation:fbhx3 19s ease-in-out infinite 4.5s;}
-.fb-hx4{width:260px;height:44px;top:68%;left:37%;
+  animation:hx3a 19s ease-in-out infinite 4.5s;}
+.hx4{width:255px;height:44px;top:67%;left:36%;
   background:linear-gradient(135deg,transparent 0%,rgba(245,158,11,.5) 18%,rgba(251,191,36,1) 50%,rgba(245,158,11,.5) 82%,transparent 100%);
   transform:rotate(9deg);
   box-shadow:0 0 28px rgba(251,191,36,.88),0 0 56px rgba(245,158,11,.46);
-  animation:fbhx4 14s ease-in-out infinite 3.5s;}
-.fb-sh{position:absolute;pointer-events:none;}
-.fb-sh1{width:200px;height:44px;top:53%;left:4%;
+  animation:hx4a 14s ease-in-out infinite 3.5s;}
+.sh{position:absolute;pointer-events:none;}
+.sh1{width:200px;height:44px;top:53%;left:4%;
   background:linear-gradient(90deg,rgba(139,92,246,.9) 0%,rgba(167,139,250,1) 62%,rgba(139,92,246,.3) 100%);
   clip-path:polygon(0 24%,78% 24%,78% 0%,100% 50%,78% 100%,78% 76%,0 76%);
   filter:drop-shadow(0 0 14px rgba(167,139,250,.9)) drop-shadow(0 0 30px rgba(139,92,246,.48));
-  animation:fbsh1 17s ease-in-out infinite 1.2s;}
-.fb-sh2{width:160px;height:36px;top:31%;left:4%;
+  animation:sh1a 17s ease-in-out infinite 1.2s;}
+.sh2{width:160px;height:36px;top:31%;left:4%;
   background:linear-gradient(90deg,rgba(239,68,68,.85) 0%,rgba(252,165,165,1) 62%,rgba(239,68,68,.25) 100%);
   clip-path:polygon(0 24%,78% 24%,78% 0%,100% 50%,78% 100%,78% 76%,0 76%);
   filter:drop-shadow(0 0 12px rgba(252,165,165,.88)) drop-shadow(0 0 26px rgba(239,68,68,.44));
-  animation:fbsh2 21s ease-in-out infinite 6s;}
-.fb-orb{position:absolute;border-radius:50%;pointer-events:none;}
-.fb-orb1{width:460px;height:460px;top:-14%;left:-10%;background:radial-gradient(circle,rgba(6,182,212,.13) 0%,transparent 62%);filter:blur(42px);}
-.fb-orb2{width:380px;height:380px;top:28%;left:14%;background:radial-gradient(circle,rgba(139,92,246,.11) 0%,transparent 62%);filter:blur(36px);}
-.fb-orb3{width:340px;height:340px;top:52%;left:44%;background:radial-gradient(circle,rgba(244,114,182,.09) 0%,transparent 62%);filter:blur(32px);}
-.fb-rfade{position:absolute;top:0;right:0;bottom:0;width:160px;background:linear-gradient(to right,transparent,#0a0e1a);pointer-events:none;}
-.fb-tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#0a0e1a 0%,transparent 8%,transparent 92%,#0a0e1a 100%);pointer-events:none;}
-@keyframes fbhx1{0%,100%{transform:rotate(-22deg) translate(0,0) scale(1)}35%{transform:rotate(-19deg) translate(10px,-7px) scale(1.03)}70%{transform:rotate(-25deg) translate(-7px,9px) scale(.97)}}
-@keyframes fbhx2{0%,100%{transform:rotate(14deg) translate(0,0) scale(1)}40%{transform:rotate(16deg) translate(-11px,7px) scale(1.04)}80%{transform:rotate(11deg) translate(9px,-9px) scale(.96)}}
-@keyframes fbhx3{0%,100%{transform:rotate(-36deg) translate(0,0) scale(1)}50%{transform:rotate(-33deg) translate(7px,11px) scale(1.05)}}
-@keyframes fbhx4{0%,100%{transform:rotate(9deg) translate(0,0) scale(1)}45%{transform:rotate(12deg) translate(-9px,-7px) scale(1.04)}}
-@keyframes fbsh1{0%,100%{transform:translate(0,0);opacity:.9}55%{transform:translate(13px,-9px);opacity:1}}
-@keyframes fbsh2{0%,100%{transform:translate(0,0);opacity:.85}65%{transform:translate(-11px,11px);opacity:.97}}
+  animation:sh2a 21s ease-in-out infinite 6s;}
+.lp{position:absolute;border-radius:50%;pointer-events:none;}
+.lp1{width:110px;height:72px;top:34%;left:29%;border-top:2.5px solid rgba(34,211,238,.55);animation:lp1a 13s ease-in-out infinite 1.8s;}
+.lp2{width:78px;height:52px;top:60%;left:26%;border-top:2px solid rgba(167,139,250,.50);animation:lp2a 18s ease-in-out infinite 4s;}
+.orb{position:absolute;border-radius:50%;pointer-events:none;}
+.orb1{width:460px;height:460px;top:-14%;left:-10%;background:radial-gradient(circle,rgba(6,182,212,.14) 0%,transparent 62%);filter:blur(42px);}
+.orb2{width:380px;height:380px;top:28%;left:14%;background:radial-gradient(circle,rgba(139,92,246,.12) 0%,transparent 62%);filter:blur(36px);}
+.orb3{width:340px;height:340px;top:52%;left:44%;background:radial-gradient(circle,rgba(244,114,182,.10) 0%,transparent 62%);filter:blur(32px);}
+.rfade{position:absolute;top:0;right:0;bottom:0;width:160px;background:linear-gradient(to right,transparent,#020408);pointer-events:none;}
+.tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#0a0e1a 0%,transparent 8%,transparent 92%,#0a0e1a 100%);pointer-events:none;}
+@keyframes hx1a{0%,100%{transform:rotate(-22deg) translate(0,0) scale(1)}35%{transform:rotate(-19deg) translate(10px,-7px) scale(1.03)}70%{transform:rotate(-25deg) translate(-7px,9px) scale(.97)}}
+@keyframes hx2a{0%,100%{transform:rotate(14deg) translate(0,0) scale(1)}40%{transform:rotate(16deg) translate(-11px,7px) scale(1.04)}80%{transform:rotate(11deg) translate(9px,-9px) scale(.96)}}
+@keyframes hx3a{0%,100%{transform:rotate(-36deg) translate(0,0) scale(1)}50%{transform:rotate(-33deg) translate(7px,11px) scale(1.05)}}
+@keyframes hx4a{0%,100%{transform:rotate(9deg) translate(0,0) scale(1)}45%{transform:rotate(12deg) translate(-9px,-7px) scale(1.04)}}
+@keyframes sh1a{0%,100%{transform:translate(0,0);opacity:.9}55%{transform:translate(13px,-9px);opacity:1}}
+@keyframes sh2a{0%,100%{transform:translate(0,0);opacity:.85}65%{transform:translate(-11px,11px);opacity:.97}}
+@keyframes lp1a{0%,100%{opacity:.45;transform:translate(0,0)}50%{opacity:.72;transform:translate(9px,-6px)}}
+@keyframes lp2a{0%,100%{opacity:.38;transform:translate(0,0)}55%{opacity:.62;transform:translate(-7px,8px)}}
 
 /* ── Right: futuristic grid panel ── */
-.hero-right{
-  flex:0 0 48%;
-  display:flex;flex-direction:column;justify-content:center;
-  padding:0 56px 0 52px;
+.ltxt{
+  flex:0 0 48%;display:flex;flex-direction:column;justify-content:center;
+  padding:0 52px 0 48px;
   background-color:#020408;
   background-image:
     linear-gradient(rgba(34,211,238,.032) 1px,transparent 1px),
@@ -3278,18 +3281,10 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
   background-size:44px 44px;
   position:relative;overflow:hidden;
 }
-.hero-right::before{
+.ltxt::before{
   content:'';position:absolute;left:0;top:0;bottom:0;width:1px;
   background:linear-gradient(to bottom,transparent 5%,rgba(34,211,238,.28) 50%,transparent 95%);
 }
-/* faint corner radiance */
-.hero-right::after{
-  content:'';position:absolute;right:-80px;top:-80px;
-  width:320px;height:320px;border-radius:50%;
-  background:radial-gradient(circle,rgba(139,92,246,.06) 0%,transparent 65%);
-  pointer-events:none;
-}
-
 .badge{
   display:inline-flex;align-items:center;gap:8px;
   font-size:9px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;
@@ -3297,11 +3292,10 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
   border:1px solid rgba(34,211,238,.18);border-radius:20px;
   background:rgba(34,211,238,.04);width:fit-content;
 }
-.badge-dot{width:5px;height:5px;border-radius:50%;background:#22d3ee;animation:pulse-dot 2s infinite;}
-@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.2}}
-
-.title-1{font-size:44px;font-weight:800;line-height:1.08;color:#f1f5f9;margin:0 0 3px;letter-spacing:-.03em;}
-.title-2{
+.badge-dot{width:5px;height:5px;border-radius:50%;background:#22d3ee;animation:pdot 2s infinite;}
+@keyframes pdot{0%,100%{opacity:1}50%{opacity:.2}}
+.t1{font-size:44px;font-weight:800;line-height:1.08;color:#f1f5f9;margin:0 0 3px;letter-spacing:-.03em;}
+.t2{
   font-size:44px;font-weight:800;line-height:1.08;
   background:linear-gradient(120deg,#22d3ee 0%,#818cf8 52%,#f472b6 100%);
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
@@ -3314,37 +3308,32 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
   border-radius:6px;padding:4px 12px;font-size:10px;color:#64748b;
   font-weight:500;letter-spacing:.02em;
 }
-.dpp-char{display:inline-block;will-change:transform,opacity;}
+.dc{display:inline-block;will-change:transform,opacity;}
 </style>
 </head>
 <body>
 <div class="hero">
-
-  <!-- Left: 3Dmol auto-rotating rainbow ribbon (CSS fallback if CDN blocked) -->
-  <div class="hero-left">
-    <div id="mol-viewer"></div>
-    <div class="vload" id="vload"><div class="vload-ring"></div></div>
-    <div class="fb" id="fb">
-      <div class="fb-orb fb-orb1"></div>
-      <div class="fb-orb fb-orb2"></div>
-      <div class="fb-orb fb-orb3"></div>
-      <div class="fb-hx fb-hx1"></div>
-      <div class="fb-hx fb-hx2"></div>
-      <div class="fb-hx fb-hx3"></div>
-      <div class="fb-hx fb-hx4"></div>
-      <div class="fb-sh fb-sh1"></div>
-      <div class="fb-sh fb-sh2"></div>
-      <div class="fb-rfade"></div>
-      <div class="fb-tbfade"></div>
-    </div>
+  <div class="lvis">
+    <div class="lbg"></div>
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+    <div class="hx hx1"></div>
+    <div class="hx hx2"></div>
+    <div class="hx hx3"></div>
+    <div class="hx hx4"></div>
+    <div class="sh sh1"></div>
+    <div class="sh sh2"></div>
+    <div class="lp lp1"></div>
+    <div class="lp lp2"></div>
+    <div class="rfade"></div>
+    <div class="tbfade"></div>
   </div>
-
-  <!-- Right: grid text panel -->
-  <div class="hero-right">
+  <div class="ltxt">
     <span class="badge" id="badge"><span class="badge-dot"></span>Dark Proteome Pipeline</span>
-    <p class="title-1" id="t1">Illuminate the</p>
-    <p class="title-2" id="t2">dark proteome</p>
-    <p class="desc"    id="desc">Automated structural and functional annotation for uncharacterised microbial proteins — five complementary EBI REST APIs in one pipeline.</p>
+    <p class="t1" id="t1">Illuminate the</p>
+    <p class="t2" id="t2">dark proteome</p>
+    <p class="desc" id="desc">Automated structural and functional annotation for uncharacterised microbial proteins — five complementary EBI REST APIs in one pipeline.</p>
     <div class="chips" id="chips">
       <span class="chip">InterProScan</span>
       <span class="chip">BLASTp</span>
@@ -3354,96 +3343,31 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
     </div>
   </div>
 </div>
-
-<!-- Pre-hide text elements; two independent timers — text fallback + spinner hide -->
 <script>
-/* _fb: text/chip fallback — cleared when Anime.js loads */
 var _fb=setTimeout(function(){
-  ['#badge','#t1','#t2','#desc'].forEach(function(s){
-    var e=document.querySelector(s);if(e){e.style.opacity='1';e.style.transform='none';}
-  });
-  document.querySelectorAll('.chip,.dpp-char').forEach(function(e){e.style.opacity='1';e.style.transform='none';});
+  ['#badge','#t1','#t2','#desc'].forEach(function(s){var e=document.querySelector(s);if(e){e.style.opacity='1';e.style.transform='none';}});
+  document.querySelectorAll('.chip,.dc').forEach(function(e){e.style.opacity='1';e.style.transform='none';});
 },5000);
-/* _spinHide: always hides the spinner after 4 s regardless of Anime.js / 3Dmol status */
-var _spinHide=setTimeout(function(){
-  var vl=document.getElementById('vload');
-  if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},900);}
-},4000);
-['#badge','#t2','#desc'].forEach(function(s){
-  var e=document.querySelector(s);if(e)e.style.opacity='0';
-});
+['#badge','#t2','#desc'].forEach(function(s){var e=document.querySelector(s);if(e)e.style.opacity='0';});
 document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='0';e.style.transform='translateY(6px)';});
 </script>
-
-<!-- 3Dmol.js protein viewer — cascades through CDNs, CSS fallback if all fail -->
-<script>
-(function(){
-  var b64='__VASE_B64__';
-  var cdns=[
-    'https://cdn.jsdelivr.net/npm/3dmol@2.4.2/build/3Dmol-min.js',
-    'https://unpkg.com/3dmol@2.4.2/build/3Dmol-min.js',
-    'https://3dmol.org/build/3Dmol-min.js',
-  ];
-  var idx=0;
-
-  /* fb is always visible behind the spinner; just hide the spinner to reveal it */
-  function hideSpin(){
-    clearTimeout(_spinHide);
-    var vl=document.getElementById('vload');
-    if(vl){vl.style.opacity='0';setTimeout(function(){vl.style.display='none';},1100);}
-  }
-
-  function initViewer(n){
-    n=n||0;
-    /* give up after ~8 s of polling — spinner hidden by the 5 s text timer anyway */
-    if(n>100){hideSpin();return;}
-    if(typeof $3Dmol==='undefined'){setTimeout(function(){initViewer(n+1);},80);return;}
-    try{
-      var container=document.getElementById('mol-viewer');
-      var viewer=$3Dmol.createViewer(container,{
-        backgroundColor:'#0a0e1a',antialias:true,disableFog:true,
-      });
-      viewer.addModel(atob(b64),'pdb');
-      viewer.setStyle({},{cartoon:{colorscheme:'rainbow'}});
-      viewer.zoomTo();
-      viewer.zoom(0.88);
-      viewer.spin('y',0.8);
-      viewer.render();
-      hideSpin();
-    }catch(e){hideSpin();}
-  }
-
-  function tryNext(){
-    if(idx>=cdns.length){hideSpin();return;}
-    var s=document.createElement('script');
-    s.src=cdns[idx++];
-    s.onload=function(){setTimeout(initViewer,60);};
-    s.onerror=tryNext;
-    document.head.appendChild(s);
-  }
-
-  tryNext();
-})();
-</script>
-
-<!-- Anime.js text animations for right panel -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"
-        onload="dppAnim()"
-        onerror="clearTimeout(_fb);['#badge','#t1','#t2','#desc'].forEach(function(s){var e=document.querySelector(s);if(e){e.style.opacity='1';e.style.transform='none';}});document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='1';e.style.transform='none';})">
+  onload="dppAnim()"
+  onerror="clearTimeout(_fb);['#badge','#t1','#t2','#desc'].forEach(function(s){var e=document.querySelector(s);if(e){e.style.opacity='1';e.style.transform='none';}});document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='1';e.style.transform='none';})">
 </script>
 <script>
 function dppAnim(){
   clearTimeout(_fb);
   var t1=document.getElementById('t1');
   t1.innerHTML=t1.textContent.split('').map(function(c){
-    return '<span class="dpp-char" style="opacity:0;transform:translateY(16px)">'+(c===' '?'&nbsp;':c)+'</span>';
+    return '<span class="dc" style="opacity:0;transform:translateY(16px)">'+(c===' '?'&nbsp;':c)+'</span>';
   }).join('');
   document.getElementById('t2').style.transform='translateY(18px)';
   document.getElementById('desc').style.transform='translateY(14px)';
   document.getElementById('badge').style.transform='translateY(8px)';
   var tl=anime.timeline({easing:'easeOutExpo'});
   tl.add({targets:'#badge',opacity:[0,1],translateY:[8,0],duration:600});
-  tl.add({targets:'#t1 .dpp-char',opacity:[0,1],translateY:[16,0],duration:550,delay:anime.stagger(28)},'-=300');
+  tl.add({targets:'#t1 .dc',opacity:[0,1],translateY:[16,0],duration:550,delay:anime.stagger(28)},'-=300');
   tl.add({targets:'#t2',opacity:[0,1],translateY:[18,0],duration:700},'-=150');
   tl.add({targets:'#desc',opacity:[0,1],translateY:[14,0],duration:550},'-=480');
   tl.add({targets:'#chips .chip',opacity:[0,1],translateY:[6,0],duration:360,delay:anime.stagger(65)},'-=260');
@@ -3453,24 +3377,13 @@ function dppAnim(){
 </html>"""
 
 
-@st.cache_resource
-def _build_landing_html():
-    """Read VASE.pdb once, base64-encode it, and inject into the hero template."""
-    try:
-        b64 = base64.b64encode(
-            pathlib.Path("data/input/VASE.pdb").read_bytes()
-        ).decode()
-    except (FileNotFoundError, OSError):
-        b64 = ""
-    return _LANDING_HERO_TEMPLATE.replace("__VASE_B64__", b64)
-
 
 # ── Page routing ───────────────────────────────────────────────────────────────
 
 _page = st.session_state.get("page", "landing")
 
 if _page == "landing":
-    components.html(_build_landing_html(), height=620, scrolling=False)
+    components.html(_LANDING_IFRAME_HTML, height=620, scrolling=False)
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     _, _cta, _ = st.columns([2, 3, 2])
     with _cta:
