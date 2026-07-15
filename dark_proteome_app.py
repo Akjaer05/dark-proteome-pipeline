@@ -155,19 +155,10 @@ html, body, .stApp,
 .block-container { padding: 0 !important; max-width: 100% !important; }
 h1, h2, h3 { color: var(--text) !important; }
 
-/* ── Column layout — sidebar only on 2-column layouts ─────────────────────── */
+/* ── Column layout ──────────────────────────────────────────────────────────── */
 [data-testid="stHorizontalBlock"] {
     gap: 0 !important;
     align-items: stretch !important;
-}
-[data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:first-child {
-    background: var(--surface) !important;
-    border-right: 1px solid var(--border) !important;
-    padding: 28px 20px 80px !important;
-    min-height: 65vh;
-}
-[data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:last-child {
-    padding: 28px 32px 80px !important;
 }
 
 /* ── Widget labels ──────────────────────────────────────────────────────────── */
@@ -3594,12 +3585,9 @@ _PIPELINE_TOOLS = [
 if not _res_cur:
     # ── Centered upload form (no results yet) ──────────────────────────────────
 
-    _bk_col, _ = st.columns([1, 8])
-    with _bk_col:
-        if st.button("← Home", key="back_home"):
-            st.session_state["page"] = "landing"
-            st.rerun()
-
+    if st.button("← Home", key="back_home", help="Return to landing page"):
+        st.session_state["page"] = "landing"
+        st.rerun()
     st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
     _, _fc, _ = st.columns([1, 4, 1])
@@ -3687,6 +3675,29 @@ if not _res_cur:
 
 else:
     # ── Split layout — results view ────────────────────────────────────────────
+
+    # Inject sidebar CSS only in the results view so upload-form 2-col layouts
+    # don't accidentally receive sidebar styling.
+    st.markdown("""<style>
+[data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:first-child {
+    background: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
+    padding: 28px 20px 80px !important;
+    min-height: 65vh;
+}
+[data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:last-child {
+    padding: 28px 32px 80px !important;
+}
+[data-testid="column"] [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:first-child {
+    background: none !important;
+    border: none !important;
+    padding: initial !important;
+    min-height: unset !important;
+}
+[data-testid="column"] [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:last-child {
+    padding: initial !important;
+}
+</style>""", unsafe_allow_html=True)
 
     col_left, col_right = st.columns([3, 9], gap="small")
 
