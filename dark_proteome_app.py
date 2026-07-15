@@ -152,7 +152,9 @@ html, body, .stApp,
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif !important;
     color: var(--muted) !important;
 }
-.block-container { padding: 0 !important; max-width: 100% !important; }
+.block-container { padding: 0 1.5rem !important; max-width: 100% !important; }
+/* Center the upload form content at a readable width */
+.na-page-wrap { max-width: 760px; margin: 0 auto; padding: 40px 0 80px; }
 h1, h2, h3 { color: var(--text) !important; }
 
 /* ── Column layout ──────────────────────────────────────────────────────────── */
@@ -428,28 +430,30 @@ h1, h2, h3 { color: var(--text) !important; }
 # ── Navbar ─────────────────────────────────────────────────────────────────────
 
 st.markdown(f"""
-<nav style="background:#080c17; border-bottom:1px solid #1e2d4a; padding:0 28px;
+<nav style="background:#0a1119; border-bottom:1px solid rgba(0,200,255,0.10); padding:0 28px;
             height:54px; display:flex; align-items:center; justify-content:space-between;
             position:sticky; top:0; z-index:200;">
   <div style="display:flex; align-items:center; gap:11px;">
-    <div style="background:linear-gradient(135deg,#3b82f6,#1d4ed8); width:32px; height:32px;
-                border-radius:8px; display:flex; align-items:center; justify-content:center;
-                box-shadow:0 3px 10px rgba(59,130,246,0.35);">
+    <div style="background:linear-gradient(135deg,rgba(0,200,255,0.20),rgba(0,200,255,0.06));
+                border:1px solid rgba(0,200,255,0.25);
+                width:32px; height:32px; border-radius:8px;
+                display:flex; align-items:center; justify-content:center;
+                box-shadow:0 0 14px rgba(0,200,255,0.15);">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-           stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+           stroke="#00c8ff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8
                  a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
         <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
         <line x1="12" y1="22.08" x2="12" y2="12"/>
       </svg>
     </div>
-    <span style="font-weight:700; font-size:16px; color:#f0f6ff;
+    <span style="font-weight:600; font-size:15px; color:#e0f4ff;
                  letter-spacing:-0.01em;">DarkProteome</span>
   </div>
   <a href="{GITHUB}" target="_blank"
-     style="display:flex; align-items:center; gap:6px; color:#475569;
+     style="display:flex; align-items:center; gap:6px; color:rgba(255,255,255,0.30);
             text-decoration:none; font-size:12px; font-weight:500;"
-     onmouseover="this.style.color='#94a3b8'" onmouseout="this.style.color='#475569'">
+     onmouseover="this.style.color='#e0f4ff'" onmouseout="this.style.color='rgba(255,255,255,0.30)'">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387
                .599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416
@@ -768,7 +772,7 @@ def _esc(v: object) -> str:
 
 def _html_table(df: pd.DataFrame, max_rows: int = 500) -> str:
     if df.empty:
-        return '<p style="color:#334155;font-size:13px;padding:16px 0;">No results found.</p>'
+        return '<p style="color:rgba(255,255,255,0.25);font-size:13px;padding:16px 0;">No results found.</p>'
     df = df.head(max_rows)
     ths = "".join(f"<th>{_esc(c)}</th>" for c in df.columns)
     body = ""
@@ -895,7 +899,7 @@ def show_phobius(text: str) -> None:
             ), unsafe_allow_html=True)
             return
     st.markdown(
-        '<p style="color:#334155;font-size:13px;padding:16px 0;">No results parsed.</p>',
+        '<p style="color:rgba(255,255,255,0.25);font-size:13px;padding:16px 0;">No results parsed.</p>',
         unsafe_allow_html=True,
     )
 
@@ -1030,57 +1034,102 @@ def show_foldseek(tar_bytes: bytes) -> None:
 # ── Structure tab — 3D viewer template ────────────────────────────────────────
 # Raw string so JS braces need no escaping; __SLOTS__ replaced at call time.
 
-_VIEWER_TMPL = r"""<!DOCTYPE html>
+_VIEWER_TMPL = """<!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
 <script src="https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"></script>
 <style>
-  html,body{margin:0;padding:0;background:#0a0e1a;overflow:hidden;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{
+    background:radial-gradient(ellipse at 50% 40%,rgba(0,200,255,0.07) 0%,#020408 60%);
+    overflow:hidden;
+  }
   #viewer{width:100%;height:__HEIGHT__px;position:relative;}
-  .brow{display:flex;gap:6px;padding:9px 12px;background:#080c17;
-        border-top:1px solid #1e2d4a;align-items:center;}
-  button{background:#0d1424;color:#64748b;border:1px solid #1e2d4a;border-radius:5px;
-         padding:4px 11px;font-size:11px;cursor:pointer;
-         font-family:-apple-system,sans-serif;transition:all .15s;}
-  button:hover{background:#1e2d4a;color:#f0f6ff;}
-  button.on{background:#3b82f6;color:#fff;border-color:#3b82f6;}
-  .lbl{color:#334155;font-size:9.5px;font-weight:700;letter-spacing:.1em;
-       text-transform:uppercase;margin-right:2px;}
+  .brow{
+    display:flex;gap:5px;padding:8px 14px;
+    background:rgba(10,17,25,0.96);
+    border-top:1px solid rgba(0,200,255,0.10);
+    align-items:center;
+    flex-wrap:wrap;
+  }
+  button{
+    background:transparent;
+    color:rgba(255,255,255,0.32);
+    border:1px solid rgba(0,200,255,0.18);
+    border-radius:5px;
+    padding:4px 10px;
+    font-size:10.5px;
+    cursor:pointer;
+    font-family:-apple-system,sans-serif;
+    transition:all .15s;
+  }
+  button:hover{
+    background:rgba(0,200,255,0.07);
+    color:#e0f4ff;
+    border-color:rgba(0,200,255,0.40);
+  }
+  button.on{
+    background:rgba(0,200,255,0.10);
+    color:#00c8ff;
+    border-color:#00c8ff;
+    box-shadow:0 0 8px rgba(0,200,255,0.18);
+  }
+  .lbl{
+    color:rgba(255,255,255,0.22);
+    font-size:9px;
+    font-weight:700;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    margin-right:1px;
+    padding-left:4px;
+  }
+  .sep{width:1px;height:14px;background:rgba(0,200,255,0.10);margin:0 5px;flex-shrink:0;}
 </style>
 </head>
 <body>
 <div id="viewer"></div>
 <div class="brow">
   <span class="lbl">Colour</span>
-  <button id="b0" class="on" onclick="cPLDDT()">pLDDT</button>
-  <button id="b1"            onclick="cChain()">Chain</button>
-  <button id="b2"            onclick="cHydro()">Hydrophobic</button>
-  <button id="b3"            onclick="cCharge()">Charge</button>
+  <button id="b0" class="on" onclick="cSpec()">Spectrum</button>
+  <button id="b1"            onclick="cPLDDT()">pLDDT</button>
+  <button id="b2"            onclick="cChain()">Chain</button>
+  <button id="b3"            onclick="cHydro()">Hydrophobic</button>
+  <button id="b4"            onclick="cCharge()">Charge</button>
+  <div class="sep"></div>
+  <span class="lbl">Rotate</span>
+  <button id="bspin" class="on" onclick="toggleSpin()">Auto</button>
 </div>
 <script>
-var viewer=$3Dmol.createViewer('viewer',{backgroundColor:'#0a0e1a'});
+var viewer=$3Dmol.createViewer('viewer',{backgroundColor:'transparent'});
 viewer.addModel(atob("__PDB_B64__"),'pdb');
+var spinning=true;
+
 function act(id){
-  ['b0','b1','b2','b3'].forEach(function(b){
+  ['b0','b1','b2','b3','b4'].forEach(function(b){
     document.getElementById(b).classList.remove('on');
   });
   document.getElementById(id).classList.add('on');
 }
-function cPLDDT(){
+
+function cSpec(){
   act('b0');
+  viewer.setStyle({},{cartoon:{colorscheme:'spectrum'}});
+  viewer.render();
+}
+function cPLDDT(){
+  act('b1');
   viewer.setStyle({},{cartoon:{colorfunc:function(a){
     return a.b>90?'#3b82f6':a.b>70?'#eab308':a.b>50?'#f97316':'#ef4444';
   }}});
   viewer.render();
 }
 function cChain(){
-  act('b1');
+  act('b2');
   viewer.setStyle({},{cartoon:{colorscheme:'chain'}});
   viewer.render();
 }
 function cHydro(){
-  act('b2');
+  act('b3');
   var hp=['ILE','LEU','VAL','PHE','TRP','MET','ALA','TYR','CYS','PRO'];
   viewer.setStyle({},{cartoon:{colorfunc:function(a){
     return hp.indexOf(a.resn)>=0?'#f97316':'#3b82f6';
@@ -1088,19 +1137,27 @@ function cHydro(){
   viewer.render();
 }
 function cCharge(){
-  act('b3');
+  act('b4');
   var p=['LYS','ARG','HIS'],n=['ASP','GLU'];
   viewer.setStyle({},{cartoon:{colorfunc:function(a){
     if(p.indexOf(a.resn)>=0) return '#3b82f6';
     if(n.indexOf(a.resn)>=0) return '#ef4444';
-    return '#475569';
+    return 'rgba(255,255,255,0.30)';
   }}});
   viewer.render();
 }
-cPLDDT();
+function toggleSpin(){
+  spinning=!spinning;
+  var btn=document.getElementById('bspin');
+  if(spinning){viewer.spin('y',0.5);btn.textContent='Auto';btn.classList.add('on');}
+  else{viewer.spin(false);btn.textContent='Off';btn.classList.remove('on');}
+}
+
+cSpec();
 viewer.zoomTo();
 viewer.zoom(1.1);
 viewer.render();
+viewer.spin('y',0.5);
 </script>
 </body>
 </html>"""
@@ -3283,7 +3340,7 @@ _LANDING_IFRAME_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
+html,body{background:#020408;width:100%;height:100%;overflow:hidden;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;}
 .hero{display:flex;width:100%;height:100%;}
 
@@ -3340,7 +3397,7 @@ html,body{background:#0a0e1a;width:100%;height:100%;overflow:hidden;
 .orb2{width:380px;height:380px;top:28%;left:14%;background:radial-gradient(circle,rgba(139,92,246,.12) 0%,transparent 62%);filter:blur(36px);}
 .orb3{width:340px;height:340px;top:52%;left:44%;background:radial-gradient(circle,rgba(244,114,182,.10) 0%,transparent 62%);filter:blur(32px);}
 .rfade{position:absolute;top:0;right:0;bottom:0;width:160px;background:linear-gradient(to right,transparent,#020408);pointer-events:none;}
-.tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#0a0e1a 0%,transparent 8%,transparent 92%,#0a0e1a 100%);pointer-events:none;}
+.tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#020408 0%,transparent 8%,transparent 92%,#020408 100%);pointer-events:none;}
 @keyframes hx1a{0%,100%{transform:rotate(-22deg) translate(0,0) scale(1)}35%{transform:rotate(-19deg) translate(10px,-7px) scale(1.03)}70%{transform:rotate(-25deg) translate(-7px,9px) scale(.97)}}
 @keyframes hx2a{0%,100%{transform:rotate(14deg) translate(0,0) scale(1)}40%{transform:rotate(16deg) translate(-11px,7px) scale(1.04)}80%{transform:rotate(11deg) translate(9px,-9px) scale(.96)}}
 @keyframes hx3a{0%,100%{transform:rotate(-36deg) translate(0,0) scale(1)}50%{transform:rotate(-33deg) translate(7px,11px) scale(1.05)}}
@@ -3592,6 +3649,7 @@ if not _res_cur:
 
     _, _fc, _ = st.columns([1, 4, 1])
     with _fc:
+        st.markdown('<div class="na-page-wrap">', unsafe_allow_html=True)
         st.markdown(
             '<h1 class="na-title">New analysis</h1>'
             '<p class="na-sub">Annotate your protein with five complementary tools: '
@@ -3672,6 +3730,7 @@ if not _res_cur:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 else:
     # ── Split layout — results view ────────────────────────────────────────────
