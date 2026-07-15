@@ -122,158 +122,192 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-/* ── Hide Streamlit chrome ─────────────────────────────── */
-#MainMenu, footer { visibility: hidden; }
+/* ── Hide Streamlit chrome ──────────────────────────────────────────────────── */
+#MainMenu, footer, [data-testid="stDeployButton"] { visibility: hidden !important; }
 [data-testid="stDecoration"],
 [data-testid="stStatusWidget"]  { display: none !important; }
 [data-testid="stHeader"]        { background: transparent !important; height: 0 !important; }
 [data-testid="stToolbar"]       { display: none !important; }
 
-/* ── Base ──────────────────────────────────────────────── */
+/* ── Design tokens ──────────────────────────────────────────────────────────── */
+:root {
+  --bg:      #020408;
+  --surface: #0a1119;
+  --surf2:   #0d1520;
+  --border:  rgba(0,200,255,0.12);
+  --bord2:   rgba(0,200,255,0.06);
+  --accent:  #00c8ff;
+  --aglow:   rgba(0,200,255,0.18);
+  --text:    #e0f4ff;
+  --muted:   rgba(255,255,255,0.45);
+  --muted2:  rgba(255,255,255,0.25);
+  --muted3:  rgba(255,255,255,0.14);
+}
+
+/* ── Base ───────────────────────────────────────────────────────────────────── */
 html, body, .stApp,
 [data-testid="stAppViewContainer"],
 [data-testid="stMain"], .main {
-    background-color: #0a0e1a !important;
+    background-color: var(--bg) !important;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif !important;
-    color: #94a3b8 !important;
+    color: var(--muted) !important;
 }
 .block-container { padding: 0 !important; max-width: 100% !important; }
+h1, h2, h3 { color: var(--text) !important; }
 
-/* ── Column layout — sidebar only on 2-column layouts ──────────────────────── */
+/* ── Column layout — sidebar only on 2-column layouts ─────────────────────── */
 [data-testid="stHorizontalBlock"] {
     gap: 0 !important;
     align-items: stretch !important;
 }
 [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:first-child {
-    background: #080c17 !important;
-    border-right: 1px solid #1e2d4a !important;
-    padding: 28px 20px 60px !important;
+    background: var(--surface) !important;
+    border-right: 1px solid var(--border) !important;
+    padding: 28px 20px 80px !important;
     min-height: 65vh;
 }
 [data-testid="stHorizontalBlock"]:has(> [data-testid="column"]:last-child:nth-child(2)) > [data-testid="column"]:last-child {
-    padding: 22px 28px 60px !important;
+    padding: 28px 32px 80px !important;
 }
 
-/* ── Widget labels ──────────────────────────────────────── */
+/* ── Widget labels ──────────────────────────────────────────────────────────── */
 [data-testid="stWidgetLabel"] p,
 [data-testid="stWidgetLabel"] {
-    color: #475569 !important;
+    color: var(--muted2) !important;
     font-size: 10px !important;
     font-weight: 700 !important;
-    letter-spacing: 0.09em !important;
+    letter-spacing: 0.12em !important;
     text-transform: uppercase !important;
 }
 
-/* ── File uploader ──────────────────────────────────────── */
+/* ── File uploader ──────────────────────────────────────────────────────────── */
 [data-testid="stFileUploaderDropzone"] {
-    background: #0d1424 !important;
-    border: 1px dashed #1e2d4a !important;
+    background: var(--surf2) !important;
+    border: 1px dashed var(--border) !important;
     border-radius: 8px !important;
     transition: border-color 0.15s, background 0.15s !important;
 }
 [data-testid="stFileUploaderDropzone"]:hover {
-    border-color: #3b82f6 !important;
-    background: rgba(59, 130, 246, 0.03) !important;
+    border-color: var(--accent) !important;
+    background: rgba(0,200,255,0.03) !important;
 }
 [data-testid="stFileUploaderDropzone"] p,
 [data-testid="stFileUploaderDropzone"] span,
 [data-testid="stFileUploaderDropzone"] small {
-    color: #334155 !important;
+    color: var(--muted3) !important;
     font-size: 12px !important;
 }
 [data-testid="stFileUploader"] { margin-bottom: 4px !important; }
 
-/* ── Buttons ────────────────────────────────────────────── */
-.stButton > button {
-    background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
-    color: #ffffff !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
+/* ── Text input ─────────────────────────────────────────────────────────────── */
+[data-testid="stTextInput"] input {
+    background: var(--surf2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 6px !important;
+    color: var(--text) !important;
     font-size: 13px !important;
-    letter-spacing: 0.02em !important;
-    padding: 10px 20px !important;
+}
+[data-testid="stTextInput"] input:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px rgba(0,200,255,0.10) !important;
+    outline: none !important;
+}
+[data-testid="stTextInput"] input::placeholder { color: var(--muted3) !important; }
+
+/* ── Buttons ────────────────────────────────────────────────────────────────── */
+.stButton > button {
+    background: transparent !important;
+    color: var(--accent) !important;
+    border: 1px solid rgba(0,200,255,0.35) !important;
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+    font-size: 13px !important;
+    letter-spacing: 0.03em !important;
+    padding: 10px 22px !important;
     width: 100% !important;
-    box-shadow: 0 4px 14px rgba(59, 130, 246, 0.25) !important;
-    transition: all 0.2s !important;
+    transition: all 0.2s ease !important;
     margin-top: 6px !important;
 }
 .stButton > button:hover:not(:disabled) {
-    box-shadow: 0 8px 28px rgba(59, 130, 246, 0.55) !important;
-    transform: translateY(-2px) scale(1.025) !important;
+    background: rgba(0,200,255,0.07) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 20px var(--aglow) !important;
+    transform: translateY(-1px) !important;
 }
 @keyframes dpp-btn-glow {
-    0%,100% { box-shadow: 0 4px 14px rgba(59,130,246,.25); }
-    50%      { box-shadow: 0 4px 26px rgba(59,130,246,.52); }
+    0%,100% { box-shadow: 0 0 8px rgba(0,200,255,0.10), 0 0 0 1px rgba(0,200,255,0.20); border-color: rgba(0,200,255,0.35) !important; }
+    50%      { box-shadow: 0 0 22px rgba(0,200,255,0.28), 0 0 0 1px rgba(0,200,255,0.50); border-color: rgba(0,200,255,0.65) !important; }
 }
 .stButton > button[kind="primary"]:not(:disabled) {
     animation: dpp-btn-glow 3s ease-in-out infinite !important;
 }
 .stButton > button:disabled {
-    background: #0d1424 !important;
-    color: #334155 !important;
+    background: transparent !important;
+    color: var(--muted3) !important;
+    border-color: var(--muted3) !important;
     box-shadow: none !important;
-    border: 1px solid #1e2d4a !important;
+    animation: none !important;
 }
 
-/* ── Tabs ───────────────────────────────────────────────── */
+/* ── Tabs ───────────────────────────────────────────────────────────────────── */
 .stTabs [data-baseweb="tab-list"] {
-    background: #080c17 !important;
-    border-bottom: 1px solid #1e2d4a !important;
+    background: var(--surface) !important;
+    border-bottom: 1px solid var(--border) !important;
     padding: 0 4px !important;
     gap: 0 !important;
 }
 .stTabs [data-baseweb="tab"] {
-    color: #475569 !important;
+    color: var(--muted2) !important;
     background: transparent !important;
     border: none !important;
     border-bottom: 2px solid transparent !important;
     padding: 10px 16px !important;
     font-size: 12px !important;
     font-weight: 500 !important;
+    letter-spacing: 0.03em !important;
     transition: color 0.15s !important;
 }
-.stTabs [data-baseweb="tab"]:hover { color: #94a3b8 !important; }
+.stTabs [data-baseweb="tab"]:hover { color: var(--muted) !important; }
 .stTabs [aria-selected="true"] {
-    color: #3b82f6 !important;
-    border-bottom: 2px solid #3b82f6 !important;
-    background: rgba(59, 130, 246, 0.04) !important;
+    color: var(--accent) !important;
+    border-bottom: 2px solid var(--accent) !important;
+    background: rgba(0,200,255,0.04) !important;
 }
 .stTabs [data-baseweb="tab-panel"] {
     background: transparent !important;
-    padding: 14px 0 0 !important;
-    animation: dpp-panel-reveal 0.42s cubic-bezier(0.25,0.46,0.45,0.94) both !important;
+    padding: 20px 0 0 !important;
+    animation: dpp-panel-reveal 0.35s ease-out both !important;
 }
 @keyframes dpp-panel-reveal {
-    from { opacity:0; transform:translateY(14px); }
+    from { opacity:0; transform:translateY(12px); }
     to   { opacity:1; transform:translateY(0); }
 }
 
-/* ── Alerts ─────────────────────────────────────────────── */
+/* ── Alerts ─────────────────────────────────────────────────────────────────── */
 [data-testid="stAlert"] {
-    background: #080c17 !important;
-    border: 1px solid #1e2d4a !important;
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
     border-radius: 8px !important;
-    color: #94a3b8 !important;
+    color: var(--muted) !important;
 }
 
-/* ── Spinner ────────────────────────────────────────────── */
+/* ── Spinner ────────────────────────────────────────────────────────────────── */
 [data-testid="stSpinner"] > div > div {
-    border-top-color: #3b82f6 !important;
+    border-top-color: var(--accent) !important;
 }
 
-/* ── Scrollbar ──────────────────────────────────────────── */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #0a0e1a; }
-::-webkit-scrollbar-thumb { background: #1e2d4a; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: rgba(0,200,255,0.14); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
-/* ── Dark result table ──────────────────────────────────── */
+/* ── Result tables ──────────────────────────────────────────────────────────── */
 .dp-wrap {
     overflow-x: auto;
     border-radius: 8px;
-    border: 1px solid #1e2d4a;
-    margin: 10px 0 4px;
+    border: 1px solid var(--border);
+    margin: 12px 0;
 }
 .dp-tbl {
     width: 100%;
@@ -282,21 +316,21 @@ html, body, .stApp,
     font-size: 11.5px;
 }
 .dp-tbl thead th {
-    background: #080c17;
-    color: #3b82f6;
+    background: var(--surface);
+    color: var(--accent);
     font-size: 9.5px;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    padding: 10px 14px;
-    border-bottom: 1px solid #1e2d4a;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
     white-space: nowrap;
     text-align: left;
 }
 .dp-tbl tbody td {
-    color: #94a3b8;
-    padding: 8px 14px;
-    border-bottom: 1px solid #0d1424;
+    color: var(--muted);
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--bord2);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -304,44 +338,99 @@ html, body, .stApp,
 }
 .dp-tbl tbody tr:last-child td { border-bottom: none; }
 .dp-tbl tbody tr:hover td {
-    background: rgba(59, 130, 246, 0.04);
-    color: #c8d9f0;
+    background: rgba(0,200,255,0.03);
+    color: var(--text);
 }
 
-/* ── Metric cards ───────────────────────────────────────── */
-.dp-cards { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+/* ── Metric cards ───────────────────────────────────────────────────────────── */
+.dp-cards { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
 .dp-card {
-    background: #080c17;
-    border: 1px solid #1e2d4a;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 12px 18px;
+    padding: 14px 18px;
     min-width: 110px;
 }
 .dp-card-label {
-    color: #475569;
+    color: var(--muted2);
     font-size: 9.5px;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
-    margin-bottom: 4px;
+    margin-bottom: 5px;
 }
-.dp-card-value { color: #f0f6ff; font-size: 21px; font-weight: 700; line-height: 1.1; }
-.dp-card-sub   { color: #334155; font-size: 10.5px; margin-top: 3px; }
+.dp-card-value { color: var(--text); font-size: 22px; font-weight: 700; line-height: 1.1; }
+.dp-card-sub   { color: var(--muted2); font-size: 10.5px; margin-top: 4px; }
 
-/* ── Tool status list ───────────────────────────────────── */
+/* ── Tool status list ───────────────────────────────────────────────────────── */
 .dp-status-row {
     display: flex;
     align-items: center;
     gap: 9px;
-    padding: 7px 0;
-    border-bottom: 1px solid #0d1424;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--bord2);
 }
 .dp-status-row:last-child { border-bottom: none; }
-.dp-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.dp-tool-name          { color: #475569; font-size: 12px; font-weight: 500; flex: 1; }
-.dp-tool-name.active   { color: #94a3b8; }
+.dp-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dp-tool-name          { color: var(--muted2); font-size: 12px; font-weight: 500; flex: 1; }
+.dp-tool-name.active   { color: var(--muted); }
 .dp-tool-name.err      { color: #ef4444; }
 .dp-badge { font-size: 10.5px; font-weight: 600; }
+
+/* ── New analysis upload form ───────────────────────────────────────────────── */
+.na-title {
+    font-size: 28px !important;
+    font-weight: 500 !important;
+    color: var(--text) !important;
+    margin: 0 0 8px !important;
+    letter-spacing: -0.02em !important;
+    line-height: 1.2 !important;
+}
+.na-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin: 0 0 36px;
+    line-height: 1.75;
+}
+.na-section {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 0 0 14px;
+}
+.na-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+.na-rule { flex: 1; height: 1px; background: var(--border); }
+.na-zone {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 16px 14px;
+    margin-bottom: 8px;
+}
+.na-zone-icon { font-size: 20px; margin-bottom: 8px; line-height: 1; }
+.na-zone-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 5px;
+}
+.na-zone-hint { font-size: 11px; color: var(--muted2); line-height: 1.6; }
+.na-tool-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+}
+.na-tool-name { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+.na-tool-desc { font-size: 11px; color: var(--muted2); line-height: 1.5; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -3378,6 +3467,104 @@ function dppAnim(){
 
 
 
+def _run_pipeline(fasta_file, pdb_file) -> None:
+    """Run pipeline tools sequentially, streaming progress to the UI."""
+    try:
+        fasta_text = fasta_file.read().decode() if fasta_file else None
+        pdb_text   = pdb_file.read().decode()   if pdb_file   else None
+
+        _cached = _load_cache(fasta_text, pdb_text)
+        if _cached:
+            st.success(
+                "✅ Results restored from cache — same files were run previously. "
+                "To force a fresh run, clear the upload and re-upload your files."
+            )
+            st.session_state["results"]      = _cached["results"]
+            st.session_state["fasta_text"]   = _cached["fasta_text"]
+            st.session_state["pdb_text"]     = _cached["pdb_text"]
+            st.session_state["active_tools"] = _cached["active_tools"]
+            st.session_state["protein_name"] = _extract_protein_name(fasta_text)
+            st.rerun()
+
+        tasks: dict = {}
+        if fasta_text:
+            tasks["InterProScan"] = (run_interproscan, fasta_text)
+            tasks["BLASTp"]       = (run_blast,        fasta_text)
+            tasks["Phobius"]      = (run_phobius,       fasta_text)
+            tasks["HMMER"]        = (run_hmmer,         fasta_text)
+        if pdb_text:
+            tasks["FoldSeek"]     = (run_foldseek,      pdb_text)
+
+        n_tasks = len(tasks)
+        _protein_name = _extract_protein_name(fasta_text)
+        st.session_state["active_tools"] = list(tasks.keys())
+        st.session_state["protein_name"] = _protein_name
+        st.session_state["results"]    = {}
+        st.session_state["fasta_text"] = fasta_text
+        st.session_state["pdb_text"]   = pdb_text
+
+        results: dict = {}
+        _pipeline_start = time.time()
+        _start_str = time.strftime("%H:%M:%S")
+        print(f"[PIPELINE] Starting {n_tasks} tools sequentially: {list(tasks.keys())}", flush=True)
+
+        with st.status(
+            f"Running {n_tasks} tool{'s' if n_tasks != 1 else ''} — this takes 8–15 minutes…",
+            expanded=True,
+        ) as _status_box:
+            st.write(f"🕐 Pipeline started at **{_start_str}** — keep this tab open")
+            for idx, (name, (fn, arg)) in enumerate(tasks.items(), 1):
+                _pipeline_elapsed = int(time.time() - _pipeline_start)
+                st.write(
+                    f"⏳  [{idx}/{n_tasks}]  **{name}** — running…"
+                    f"  _(+{_pipeline_elapsed}s  |  {time.strftime('%H:%M:%S')})_"
+                )
+                if name == "BLASTp":
+                    st.info("BLASTp can take 10–15 minutes from cloud servers — this is normal.")
+                print(f"[PIPELINE] Starting {name}", flush=True)
+                _t0 = time.time()
+                try:
+                    data = fn(arg)
+                    results[name] = {"ok": True, "data": data}
+                    _elapsed = round(time.time() - _t0, 1)
+                    _total_so_far = int(time.time() - _pipeline_start)
+                    st.write(
+                        f"✅  [{idx}/{n_tasks}]  **{name}** — done in {_elapsed}s"
+                        f"  _(pipeline total: {_total_so_far}s)_"
+                    )
+                    print(f"[PIPELINE] {name} done in {_elapsed}s", flush=True)
+                except Exception as _exc:
+                    results[name] = {"ok": False, "error": str(_exc)}
+                    _elapsed = round(time.time() - _t0, 1)
+                    st.write(f"❌  [{idx}/{n_tasks}]  **{name}** — failed: {_exc}")
+                    print(f"[PIPELINE] {name} FAILED in {_elapsed}s — {_exc}", flush=True)
+                st.session_state["results"] = dict(results)
+
+            _total  = round(time.time() - _pipeline_start, 1)
+            _n_ok   = sum(1 for r in results.values() if r["ok"])
+            _all_ok = _n_ok == n_tasks
+            _status_box.update(
+                label=(f"{'All' if _all_ok else f'{_n_ok}/{n_tasks}'} tools completed"
+                       f" — {_total}s total (started {_start_str})"),
+                state="complete" if _all_ok else "error",
+            )
+            print(f"[PIPELINE] All done in {_total}s — "
+                  f"ok={[k for k,v in results.items() if v['ok']]} "
+                  f"failed={[k for k,v in results.items() if not v['ok']]}", flush=True)
+
+        st.session_state["results"]    = results
+        st.session_state["fasta_text"] = fasta_text
+        st.session_state["pdb_text"]   = pdb_text
+        _save_cache(fasta_text, pdb_text, results, list(tasks.keys()))
+        st.rerun()
+
+    except Exception as _pipeline_crash:
+        import traceback as _tb
+        st.error(f"Pipeline crashed unexpectedly: {_pipeline_crash}")
+        st.code(_tb.format_exc())
+        print(f"[PIPELINE] CRASH: {_pipeline_crash}", flush=True)
+
+
 # ── Page routing ───────────────────────────────────────────────────────────────
 
 _page = st.session_state.get("page", "landing")
@@ -3387,205 +3574,166 @@ if _page == "landing":
     st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     _, _cta, _ = st.columns([2, 3, 2])
     with _cta:
-        if st.button("Begin Analysis  →", type="primary", use_container_width=True):
+        if st.button("Start analysis", type="primary", use_container_width=True):
             st.session_state["page"] = "analysis"
             st.rerun()
     st.stop()
 
 # ── Analysis page ──────────────────────────────────────────────────────────────
 
-col_left, col_right = st.columns([3, 9], gap="small")
+_res_cur = st.session_state.get("results", {})
 
-# ── Left panel — input + status ────────────────────────────────────────────────
+_PIPELINE_TOOLS = [
+    ("InterProScan", "Matches protein families, domains and GO terms via EBI InterPro"),
+    ("BLASTp",       "Sequence similarity search against UniProtKB/Swiss-Prot"),
+    ("FoldSeek",     "3D structural homology search using structure alignment (requires PDB)"),
+    ("Phobius",      "Predicts transmembrane topology and signal peptides"),
+    ("HMMER",        "Profile HMM search against the Pfam database"),
+]
 
-with col_left:
-    if st.button("← Home", key="back_home"):
-        st.session_state["page"] = "landing"
-        st.rerun()
-    st.markdown(
-        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;'
-        'letter-spacing:0.12em;text-transform:uppercase;margin:18px 0 16px;">Input</p>',
-        unsafe_allow_html=True,
-    )
+if not _res_cur:
+    # ── Centered upload form (no results yet) ──────────────────────────────────
 
-    fasta_file = st.file_uploader(
-        "FASTA FILE",
-        type=["fasta", "fa", "txt"],
-        help="InterProScan · BLASTp · Phobius · HMMER",
-    )
-    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
-    pdb_file = st.file_uploader(
-        "PDB FILE",
-        type=["pdb"],
-        help="FoldSeek structural search (optional)",
-    )
-    st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
+    _bk_col, _ = st.columns([1, 8])
+    with _bk_col:
+        if st.button("← Home", key="back_home"):
+            st.session_state["page"] = "landing"
+            st.rerun()
 
-    run = st.button(
-        "Run Analysis",
-        type="primary",
-        disabled=not (fasta_file or pdb_file),
-    )
+    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
 
-    if run:
-        try:
-            fasta_text = fasta_file.read().decode() if fasta_file else None
-            pdb_text   = pdb_file.read().decode()   if pdb_file   else None
+    _, _fc, _ = st.columns([1, 4, 1])
+    with _fc:
+        st.markdown(
+            '<h1 class="na-title">New analysis</h1>'
+            '<p class="na-sub">Annotate your protein with five complementary tools: '
+            'InterProScan, BLASTp, Phobius, HMMER, and FoldSeek. '
+            'Add a PDB file to enable structural homology search. '
+            'Expected runtime is 8–15 minutes.</p>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="na-section">'
+            '<span class="na-section-label">Input files</span>'
+            '<div class="na-rule"></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
-            # ── Cache check: same files → load instantly without re-running ──
-            _cached = _load_cache(fasta_text, pdb_text)
-            if _cached:
-                st.success(
-                    "✅ Results restored from cache — same files were run previously. "
-                    "To force a fresh run, clear the upload and re-upload your files."
-                )
-                st.session_state["results"]      = _cached["results"]
-                st.session_state["fasta_text"]   = _cached["fasta_text"]
-                st.session_state["pdb_text"]     = _cached["pdb_text"]
-                st.session_state["active_tools"] = _cached["active_tools"]
-                st.session_state["protein_name"] = _extract_protein_name(fasta_text)
-                st.rerun()
-
-            tasks: dict = {}
-            if fasta_text:
-                tasks["InterProScan"] = (run_interproscan, fasta_text)
-                tasks["BLASTp"]       = (run_blast,        fasta_text)
-                tasks["Phobius"]      = (run_phobius,       fasta_text)
-                tasks["HMMER"]        = (run_hmmer,         fasta_text)
-            if pdb_text:
-                tasks["FoldSeek"]     = (run_foldseek,      pdb_text)
-
-            n_tasks = len(tasks)
-            _protein_name = _extract_protein_name(fasta_text)
-            st.session_state["active_tools"] = list(tasks.keys())
-            st.session_state["protein_name"] = _protein_name
-            # Seed session state immediately so partial results appear on refresh
-            st.session_state["results"]    = {}
-            st.session_state["fasta_text"] = fasta_text
-            st.session_state["pdb_text"]   = pdb_text
-
-            results: dict = {}
-            _pipeline_start = time.time()
-            _start_str = time.strftime("%H:%M:%S")
-            print(f"[PIPELINE] Starting {n_tasks} tools sequentially: {list(tasks.keys())}", flush=True)
-
-            # Run sequentially — avoids OOM and thread contention on free-tier cloud.
-            # Each tool's status is streamed live to the UI via st.status().
-            with st.status(
-                f"Running {n_tasks} tool{'s' if n_tasks != 1 else ''} — this takes 8–15 minutes…",
-                expanded=True,
-            ) as _status_box:
-                st.write(f"🕐 Pipeline started at **{_start_str}** — keep this tab open")
-                for idx, (name, (fn, arg)) in enumerate(tasks.items(), 1):
-                    _pipeline_elapsed = int(time.time() - _pipeline_start)
-                    st.write(
-                        f"⏳  [{idx}/{n_tasks}]  **{name}** — running…"
-                        f"  _(+{_pipeline_elapsed}s  |  {time.strftime('%H:%M:%S')})_"
-                    )
-                    if name == "BLASTp":
-                        st.info(
-                            "BLASTp can take 10–15 minutes from cloud servers — this is normal."
-                        )
-                    print(f"[PIPELINE] Starting {name}", flush=True)
-                    _t0 = time.time()
-                    try:
-                        data = fn(arg)
-                        results[name] = {"ok": True, "data": data}
-                        _elapsed = round(time.time() - _t0, 1)
-                        _total_so_far = int(time.time() - _pipeline_start)
-                        st.write(
-                            f"✅  [{idx}/{n_tasks}]  **{name}** — done in {_elapsed}s"
-                            f"  _(pipeline total: {_total_so_far}s)_"
-                        )
-                        print(f"[PIPELINE] {name} done in {_elapsed}s", flush=True)
-                    except Exception as _exc:
-                        results[name] = {"ok": False, "error": str(_exc)}
-                        _elapsed = round(time.time() - _t0, 1)
-                        st.write(f"❌  [{idx}/{n_tasks}]  **{name}** — failed: {_exc}")
-                        print(f"[PIPELINE] {name} FAILED in {_elapsed}s — {_exc}", flush=True)
-                    # Write partial results to session_state after every tool so that
-                    # a browser refresh mid-pipeline shows whatever completed so far.
-                    st.session_state["results"] = dict(results)
-
-                _total   = round(time.time() - _pipeline_start, 1)
-                _n_ok    = sum(1 for r in results.values() if r["ok"])
-                _all_ok  = _n_ok == n_tasks
-                _status_box.update(
-                    label=(f"{'All' if _all_ok else f'{_n_ok}/{n_tasks}'} tools completed"
-                           f" — {_total}s total (started {_start_str})"),
-                    state="complete" if _all_ok else "error",
-                )
-                print(f"[PIPELINE] All done in {_total}s — "
-                      f"ok={[k for k,v in results.items() if v['ok']]} "
-                      f"failed={[k for k,v in results.items() if not v['ok']]}", flush=True)
-
-            st.session_state["results"]    = results
-            st.session_state["fasta_text"] = fasta_text
-            st.session_state["pdb_text"]   = pdb_text
-
-            # Save to disk — same files will reload instantly even after a server restart.
-            _save_cache(fasta_text, pdb_text, results, list(tasks.keys()))
-
-        except Exception as _pipeline_crash:
-            import traceback as _tb
-            st.error(f"Pipeline crashed unexpectedly: {_pipeline_crash}")
-            st.code(_tb.format_exc())
-            print(f"[PIPELINE] CRASH: {_pipeline_crash}", flush=True)
-
-    # Status list — reads session_state so it updates after each run
-    _res    = st.session_state.get("results",      {})
-    _active = st.session_state.get("active_tools", [])
-
-    st.markdown(
-        '<hr style="border:none;border-top:1px solid #0d1424;margin:22px 0 16px;">'
-        '<p style="color:#3b82f6;font-size:9.5px;font-weight:700;'
-        'letter-spacing:0.12em;text-transform:uppercase;margin-bottom:6px;">Tool Status</p>'
-        + _status_list(_res, _active),
-        unsafe_allow_html=True,
-    )
-
-# ── Analysis empty-state HTML ───────────────────────────────────────────────────
-
-_EMPTY_STATE_HTML = """
-<div style="display:flex;flex-direction:column;align-items:center;
-            justify-content:center;min-height:440px;">
-  <div style="opacity:0.18;margin-bottom:22px;">
-    <svg width="70" height="70" viewBox="0 0 70 70" fill="none">
-      <circle cx="35" cy="35" r="32" stroke="#94a3b8" stroke-width="1.5"/>
-      <path d="M18 35 Q18 20 35 20 Q52 20 52 35" stroke="#22d3ee" stroke-width="2.2"
-            fill="none" stroke-linecap="round"/>
-      <path d="M52 35 Q52 50 35 50 Q18 50 18 35" stroke="#a855f7" stroke-width="2.2"
-            fill="none" stroke-linecap="round"/>
-      <circle cx="35" cy="35" r="3.5" fill="#475569"/>
-    </svg>
-  </div>
-  <p style="color:#334155;font-size:13px;text-align:center;
-            line-height:1.80;margin:0;max-width:220px;">
-    Upload a FASTA file in the left panel<br>then click
-    <span style="color:#3b82f6;font-weight:600;">Run Analysis</span>
-  </p>
-</div>
-"""
-
-# ── Right panel — results ──────────────────────────────────────────────────────
-
-with col_right:
-    _res    = st.session_state.get("results",      {})
-    _active = st.session_state.get("active_tools", [])
-
-    _pdb_ss   = st.session_state.get("pdb_text")
-    _fasta_ss = st.session_state.get("fasta_text")
-
-    if not _res and not _pdb_ss:
-        _had_prior = bool(st.session_state.get("active_tools"))
-        if _had_prior:
-            st.info(
-                "**Results may have expired** — your session was reset. "
-                "Re-upload your files and click **Run Analysis** to restore results from cache "
-                "(if the same files were run before, they load instantly without re-running)."
+        _seq_col, _str_col = st.columns(2, gap="medium")
+        with _seq_col:
+            st.markdown(
+                '<div class="na-zone">'
+                '<div class="na-zone-icon">🧬</div>'
+                '<div class="na-zone-title">Sequence</div>'
+                '<div class="na-zone-hint">InterProScan · BLASTp<br>Phobius · HMMER</div>'
+                '</div>',
+                unsafe_allow_html=True,
             )
-        st.markdown(_EMPTY_STATE_HTML, unsafe_allow_html=True)
-    else:
+            fasta_file = st.file_uploader(
+                "FASTA", type=["fasta", "fa", "txt"], key="fasta_up",
+                label_visibility="collapsed",
+            )
+        with _str_col:
+            st.markdown(
+                '<div class="na-zone">'
+                '<div class="na-zone-icon">🔬</div>'
+                '<div class="na-zone-title">Structure</div>'
+                '<div class="na-zone-hint">FoldSeek structural<br>search (optional)</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            pdb_file = st.file_uploader(
+                "PDB", type=["pdb"], key="pdb_up",
+                label_visibility="collapsed",
+            )
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        _btn_c, _hint_c = st.columns([5, 6])
+        with _btn_c:
+            run = st.button(
+                "Start analysis", type="primary",
+                use_container_width=True,
+                disabled=not (fasta_file or pdb_file),
+            )
+        with _hint_c:
+            st.markdown(
+                '<p style="font-size:11.5px;color:rgba(255,255,255,0.28);'
+                'margin:16px 0 0;line-height:1.4;">5 tools · sequential · ~15 min</p>',
+                unsafe_allow_html=True,
+            )
+
+        if run:
+            _run_pipeline(fasta_file, pdb_file)
+
+        st.markdown("<div style='height:44px'></div>", unsafe_allow_html=True)
+        st.markdown(
+            '<div class="na-section">'
+            '<span class="na-section-label">Pipeline</span>'
+            '<div class="na-rule"></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        _tc1, _tc2 = st.columns(2, gap="medium")
+        for _i, (_tn, _td) in enumerate(_PIPELINE_TOOLS):
+            with (_tc1 if _i % 2 == 0 else _tc2):
+                st.markdown(
+                    f'<div class="na-tool-card">'
+                    f'<div class="na-tool-name">{_tn}</div>'
+                    f'<div class="na-tool-desc">{_td}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+else:
+    # ── Split layout — results view ────────────────────────────────────────────
+
+    col_left, col_right = st.columns([3, 9], gap="small")
+
+    with col_left:
+        if st.button("← Home", key="back_home"):
+            for _k in ["results", "fasta_text", "pdb_text", "active_tools", "protein_name"]:
+                st.session_state.pop(_k, None)
+            st.session_state["page"] = "landing"
+            st.rerun()
+        st.markdown(
+            '<p style="color:#00c8ff;font-size:9.5px;font-weight:700;'
+            'letter-spacing:0.16em;text-transform:uppercase;margin:18px 0 14px;">Input</p>',
+            unsafe_allow_html=True,
+        )
+        fasta_file = st.file_uploader(
+            "FASTA FILE", type=["fasta", "fa", "txt"], key="fasta_up_r",
+            help="InterProScan · BLASTp · Phobius · HMMER",
+        )
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        pdb_file = st.file_uploader(
+            "PDB FILE", type=["pdb"], key="pdb_up_r",
+            help="FoldSeek structural search (optional)",
+        )
+        st.markdown("<div style='height:2px'></div>", unsafe_allow_html=True)
+        run = st.button(
+            "Run again", type="primary",
+            disabled=not (fasta_file or pdb_file),
+        )
+        if run:
+            _run_pipeline(fasta_file, pdb_file)
+
+        _res    = st.session_state.get("results",      {})
+        _active = st.session_state.get("active_tools", [])
+        st.markdown(
+            '<hr style="border:none;border-top:1px solid rgba(0,200,255,0.08);margin:22px 0 16px;">'
+            '<p style="color:#00c8ff;font-size:9.5px;font-weight:700;'
+            'letter-spacing:0.16em;text-transform:uppercase;margin-bottom:6px;">Tool Status</p>'
+            + _status_list(_res, _active),
+            unsafe_allow_html=True,
+        )
+
+    with col_right:
+        _res    = st.session_state.get("results",      {})
+        _active = st.session_state.get("active_tools", [])
+        _pdb_ss   = st.session_state.get("pdb_text")
+        _fasta_ss = st.session_state.get("fasta_text")
+
         if _res:
             n_ok    = sum(r["ok"] for r in _res.values())
             n_total = len(_res)
@@ -3680,7 +3828,7 @@ with col_right:
 _qp = st.query_params
 if _qp.get("debug") == "1":
     st.markdown(
-        '<hr style="border:none;border-top:1px solid #1e2d4a;margin:28px 0 12px;">'
+        '<hr style="border:none;border-top:1px solid rgba(0,200,255,0.10);margin:28px 0 12px;">'
         '<p style="color:#f59e0b;font-size:9.5px;font-weight:700;letter-spacing:.1em;'
         'text-transform:uppercase;margin:0 0 12px;">🛠 Debug Panel</p>',
         unsafe_allow_html=True,
@@ -3848,15 +3996,15 @@ if _res_sb:
     _sc  = "#22c55e" if _ok == _tot else "#f59e0b"
     _st  = f"&#x25CF;&ensp;{_ok}/{_tot} tools completed"
 else:
-    _sc = "#334155"
+    _sc = "rgba(255,255,255,0.14)"
     _st = "&#x25CB;&ensp;Ready"
 
 st.markdown(f"""
-<div style="position:fixed;bottom:0;left:0;right:0;background:#080c17;
-            border-top:1px solid #1e2d4a;padding:7px 28px;
+<div style="position:fixed;bottom:0;left:0;right:0;background:#0a1119;
+            border-top:1px solid rgba(0,200,255,0.10);padding:7px 28px;
             display:flex;justify-content:space-between;align-items:center;
             z-index:100;font-size:11px;font-family:-apple-system,sans-serif;">
   <span style="color:{_sc};font-weight:600;">{_st}</span>
-  <span style="color:#1e2d4a;">darkproteome.streamlit.app</span>
+  <span style="color:rgba(0,200,255,0.18);">darkproteome.streamlit.app</span>
 </div>
 """, unsafe_allow_html=True)
