@@ -152,8 +152,26 @@ html, body, .stApp,
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif !important;
     color: var(--muted) !important;
 }
-.block-container { padding: 0 1.5rem !important; max-width: 100% !important; }
-/* Center the upload form content at a readable width */
+/* Layout centering — multiple selectors cover Streamlit 1.x container names */
+.block-container,
+[data-testid="stMainBlockContainer"],
+[data-testid="block-container"] {
+    max-width: 1200px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 3rem !important;
+    padding-right: 3rem !important;
+    padding-top: 0 !important;
+    padding-bottom: 3rem !important;
+}
+[data-testid="stAppViewContainer"] .block-container,
+[data-testid="stMain"] .block-container {
+    max-width: 1200px !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 3rem !important;
+    padding-right: 3rem !important;
+}
 .na-page-wrap { max-width: 760px; margin: 0 auto; padding: 40px 0 80px; }
 h1, h2, h3 { color: var(--text) !important; }
 
@@ -191,6 +209,25 @@ h1, h2, h3 { color: var(--text) !important; }
     font-size: 12px !important;
 }
 [data-testid="stFileUploader"] { margin-bottom: 4px !important; }
+[data-testid="stFileUploaderDropzone"] button {
+    background: transparent !important;
+    color: var(--accent) !important;
+    border: 1px solid rgba(0,200,255,0.40) !important;
+    border-radius: 5px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    padding: 5px 14px !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    letter-spacing: 0.03em !important;
+    min-width: auto !important;
+    width: auto !important;
+}
+[data-testid="stFileUploaderDropzone"] button:hover {
+    background: rgba(0,200,255,0.07) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 12px rgba(0,200,255,0.15) !important;
+}
 
 /* ── Text input ─────────────────────────────────────────────────────────────── */
 [data-testid="stTextInput"] input {
@@ -3330,11 +3367,16 @@ in one pipeline.</p>
 </div>
 """
 
-# ── Landing hero: 3Dmol viewer + Anime.js text (template; __VASE_B64__ filled at runtime) ──
+# Load VASE.pdb base64 for landing page 3Dmol viewer
+_vase_b64 = ""
+try:
+    _vase_path = pathlib.Path("data/input/VASE.pdb")
+    if _vase_path.exists():
+        _vase_b64 = base64.b64encode(_vase_path.read_bytes()).decode()
+except Exception:
+    pass
 
-# ── Landing hero (CSS protein visualization + Anime.js text) ─────────────────
-
-_LANDING_IFRAME_HTML = """<!DOCTYPE html>
+_LANDING_IFRAME_HTML = ("""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
@@ -3344,7 +3386,7 @@ html,body{background:#020408;width:100%;height:100%;overflow:hidden;
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Inter',sans-serif;}
 .hero{display:flex;width:100%;height:100%;}
 
-/* ── Left: animated protein secondary-structure visualization ── */
+/* ── Left: protein viewer panel ── */
 .lvis{
   flex:0 0 52%;position:relative;overflow:hidden;
   background:radial-gradient(ellipse at 38% 50%,#0d1e3a 0%,#06090f 75%);
@@ -3396,8 +3438,8 @@ html,body{background:#020408;width:100%;height:100%;overflow:hidden;
 .orb1{width:460px;height:460px;top:-14%;left:-10%;background:radial-gradient(circle,rgba(6,182,212,.14) 0%,transparent 62%);filter:blur(42px);}
 .orb2{width:380px;height:380px;top:28%;left:14%;background:radial-gradient(circle,rgba(139,92,246,.12) 0%,transparent 62%);filter:blur(36px);}
 .orb3{width:340px;height:340px;top:52%;left:44%;background:radial-gradient(circle,rgba(244,114,182,.10) 0%,transparent 62%);filter:blur(32px);}
-.rfade{position:absolute;top:0;right:0;bottom:0;width:160px;background:linear-gradient(to right,transparent,#020408);pointer-events:none;}
-.tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#020408 0%,transparent 8%,transparent 92%,#020408 100%);pointer-events:none;}
+.rfade{position:absolute;top:0;right:0;bottom:0;width:160px;background:linear-gradient(to right,transparent,#020408);pointer-events:none;z-index:20;}
+.tbfade{position:absolute;inset:0;background:linear-gradient(to bottom,#020408 0%,transparent 8%,transparent 92%,#020408 100%);pointer-events:none;z-index:20;}
 @keyframes hx1a{0%,100%{transform:rotate(-22deg) translate(0,0) scale(1)}35%{transform:rotate(-19deg) translate(10px,-7px) scale(1.03)}70%{transform:rotate(-25deg) translate(-7px,9px) scale(.97)}}
 @keyframes hx2a{0%,100%{transform:rotate(14deg) translate(0,0) scale(1)}40%{transform:rotate(16deg) translate(-11px,7px) scale(1.04)}80%{transform:rotate(11deg) translate(9px,-9px) scale(.96)}}
 @keyframes hx3a{0%,100%{transform:rotate(-36deg) translate(0,0) scale(1)}50%{transform:rotate(-33deg) translate(7px,11px) scale(1.05)}}
@@ -3451,18 +3493,26 @@ html,body{background:#020408;width:100%;height:100%;overflow:hidden;
 <body>
 <div class="hero">
   <div class="lvis">
-    <div class="lbg"></div>
-    <div class="orb orb1"></div>
-    <div class="orb orb2"></div>
-    <div class="orb orb3"></div>
-    <div class="hx hx1"></div>
-    <div class="hx hx2"></div>
-    <div class="hx hx3"></div>
-    <div class="hx hx4"></div>
-    <div class="sh sh1"></div>
-    <div class="sh sh2"></div>
-    <div class="lp lp1"></div>
-    <div class="lp lp2"></div>
+    <!-- CSS animated fallback — always visible, fades out when 3Dmol loads -->
+    <div id="css-fb" style="position:absolute;inset:0;transition:opacity 0.8s 0.1s;">
+      <div class="lbg"></div>
+      <div class="orb orb1"></div>
+      <div class="orb orb2"></div>
+      <div class="orb orb3"></div>
+      <div class="hx hx1"></div>
+      <div class="hx hx2"></div>
+      <div class="hx hx3"></div>
+      <div class="hx hx4"></div>
+      <div class="sh sh1"></div>
+      <div class="sh sh2"></div>
+      <div class="lp lp1"></div>
+      <div class="lp lp2"></div>
+    </div>
+    <!-- 3Dmol viewer — fades in when CDN loads successfully -->
+    <div id="mol-wrap" style="position:absolute;inset:0;opacity:0;transition:opacity 1.2s 0.2s;pointer-events:none;">
+      <div id="mol-view" style="width:100%;height:100%;"></div>
+      <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 42% 50%,rgba(0,200,255,0.06) 0%,transparent 58%);pointer-events:none;z-index:10;"></div>
+    </div>
     <div class="rfade"></div>
     <div class="tbfade"></div>
   </div>
@@ -3488,6 +3538,30 @@ var _fb=setTimeout(function(){
 ['#badge','#t2','#desc'].forEach(function(s){var e=document.querySelector(s);if(e)e.style.opacity='0';});
 document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='0';e.style.transform='translateY(6px)';});
 </script>
+<script>
+(function(){
+  var _b="__VASE_B64__";
+  if(!_b||_b.length<200)return;
+  var s=document.createElement('script');
+  s.src='https://3Dmol.csb.pitt.edu/build/3Dmol-min.js';
+  s.onload=function(){
+    try{
+      var el=document.getElementById('mol-view');
+      if(!el)return;
+      var v=$3Dmol.createViewer(el,{backgroundColor:'transparent'});
+      v.addModel(atob(_b),'pdb');
+      v.setStyle({},{cartoon:{colorscheme:'spectrum'}});
+      v.zoomTo();v.zoom(0.85);v.render();v.spin('y',0.35);
+      document.getElementById('mol-wrap').style.opacity='1';
+      setTimeout(function(){
+        var fb=document.getElementById('css-fb');
+        if(fb)fb.style.opacity='0';
+      },900);
+    }catch(e){console.warn('3Dmol:',e);}
+  };
+  document.head.appendChild(s);
+})();
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"
   onload="dppAnim()"
   onerror="clearTimeout(_fb);['#badge','#t1','#t2','#desc'].forEach(function(s){var e=document.querySelector(s);if(e){e.style.opacity='1';e.style.transform='none';}});document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='1';e.style.transform='none';})">
@@ -3511,7 +3585,7 @@ function dppAnim(){
 }
 </script>
 </body>
-</html>"""
+</html>""").replace("__VASE_B64__", _vase_b64)
 
 
 
