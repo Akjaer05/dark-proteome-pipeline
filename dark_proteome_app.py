@@ -1230,8 +1230,42 @@ def _parse_pdb_plddts(pdb_text: str) -> list:
     return scores
 
 
+ABSTAIN_THRESHOLD = 40   # max structural score below this → "No confident fold assignment"
+
+
+def _is_alphafold_pdb(pdb_text: str, plddts: list | None = None) -> bool:
+    """Return True when this looks like an AlphaFold/ESMFold predicted structure."""
+    for line in pdb_text.splitlines()[:30]:
+        lo = line.lower()
+        if any(m in lo for m in ("alphafold", "esm", "colabfold", "af2", "esmfold")):
+            return True
+    scores = plddts if plddts is not None else _parse_pdb_plddts(pdb_text)
+    return bool(scores and all(0.0 <= s <= 100.0 for s in scores))
+
+
+def _segment_by_plddt(plddt: list, min_domain: int = 50,
+                      floor: float = 70.0, gap_min: int = 10) -> list:
+    """Find (start, end) 1-based domain boundaries by locating pLDDT drops."""
+    n = len(plddt)
+    if n == 0:
+        return []
+    in_low, low_start = False, 0
+    cuts: list = []
+    for i, s in enumerate(plddt):
+        if s < floor and not in_low:
+            in_low, low_start = True, i
+        elif s >= floor and in_low:
+            in_low = False
+            if (i - low_start) >= gap_min:
+                cuts.append((low_start + i) // 2)
+    splits = [0] + cuts + [n]
+    segs = [(splits[i] + 1, splits[i+1]) for i in range(len(splits)-1)
+            if (splits[i+1] - splits[i]) >= min_domain]
+    return segs or [(1, n)]
+
+
 def _run_dssp_raw(pdb_text: str):
-    """Return per-residue SS code list ('H', 'E', or 'C'), or None on total failure.
+    """Return (ss_list, method_name).  ss_list is per-residue codes or None.
 
     Strategy (in order):
       1. pydssp  — pure-Python DSSP if the package is installed.
@@ -1246,7 +1280,7 @@ def _run_dssp_raw(pdb_text: str):
         raw    = pydssp.read_pdbtext(pdb_text)
         coords = raw[0] if isinstance(raw, (list, tuple)) else raw
         ss_arr = pydssp.assign(coords, out_type="c3")
-        return [str(s) for s in ss_arr]
+        return [str(s) for s in ss_arr], "pydssp"
     except Exception:
         pass
 
@@ -1274,7 +1308,7 @@ def _run_dssp_raw(pdb_text: str):
                 else:
                     ss_list.append("C")
         if ss_list:
-            return ss_list
+            return ss_list, "Ramachandran approximation (lower accuracy)"
     except Exception:
         pass
 
@@ -1293,12 +1327,12 @@ def _run_dssp_raw(pdb_text: str):
                 if _DSSP is None:
                     continue
                 dssp_obj = _DSSP(model, tmppath, dssp=exe)
-                return [dssp_obj[k][2] for k in dssp_obj]
+                return [dssp_obj[k][2] for k in dssp_obj], "DSSP"
             except Exception:
                 continue
-        return None
+        return None, "none"
     except Exception:
-        return None
+        return None, "none"
     finally:
         os.unlink(tmppath)
 
@@ -1470,11 +1504,11 @@ def _features_html(scores: list, seq: str, phobius_text) -> str:
 # ── Fold Type Classifier ──────────────────────────────────────────────────────
 
 def _run_dssp_strands(pdb_text: str):
-    """Return (strand_list, pct_dict) or ([], None).
+    """Return (strand_list, pct_dict, method_name) or ([], None, 'none').
     strand_list: [(start, end), ...] 1-based indices of beta-strand runs."""
-    ss_list = _run_dssp_raw(pdb_text)
+    ss_list, method = _run_dssp_raw(pdb_text)
     if ss_list is None:
-        return [], None
+        return [], None, "none"
     strands: list = []
     in_s, s0 = False, 0
     for i, ss in enumerate(ss_list):
@@ -1493,7 +1527,7 @@ def _run_dssp_strands(pdb_text: str):
         else:                     counts["C"] += 1
     total = sum(counts.values())
     pct = {k: round(v / total * 100, 1) for k, v in counts.items()} if total else None
-    return strands, pct
+    return strands, pct, method
 
 
 def _parse_pdb_ca_coords(pdb_text: str) -> list:
@@ -2125,11 +2159,16 @@ def _analyze_fold_type(strands: list, ca_coords: list, plddt: list, seq: str,
     lec_score,  lec_hits  = _score_lectin(ipr_data, blast_data, ss_pct, antiparallel_pct)
     cal_score,  cal_hits  = _score_calycin(ipr_data, blast_data, seq, n_total, antiparallel_pct)
 
+    # Regularity check: require SD < 30% of mean gap OR < 4 aa absolute floor
+    # (the floor prevents false-penalising tight RTX/FHA repeats where mg ≈ 3–5 aa)
+    regular_spacing = (gap_sd < max(4.0, 0.30 * mean_gap)) if mean_gap > 0 else True
+
     sol  = min(30, n * 4)
     sol += max(0, int(30 - gap_sd * 6))
     sol += round(max(parallel_pct, antiparallel_pct) * 0.2) if angles else 0
     sol += 15 if rtx_on_strands else 0
     sol += 5  if strand_plddt_mean > 70 else 0
+    if not regular_spacing: sol = max(0, sol - 20)
     sol  = min(100, max(0, sol))
 
     barrel  = 30 if 8 <= n_total <= 24 else 0
@@ -2646,10 +2685,13 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
         except Exception:
             pass
 
-    # Single DSSP run — yields strand segments + SS percentages
-    # ss is None when the dssp/mkdssp binary is unavailable
-    strands, ss = _run_dssp_strands(pdb_text)
+    # Single DSSP run — yields strand segments + SS percentages + method name
+    # ss is None when no SS assignment succeeded
+    strands, ss, ss_method = _run_dssp_strands(pdb_text)
     dssp_ok = ss is not None
+
+    # Warn when B-factors don't look like pLDDT (experimental structure)
+    is_af = _is_alphafold_pdb(pdb_text, plddt)
 
     # Cα coordinates for crossing-angle analysis
     ca_coords = _parse_pdb_ca_coords(pdb_text) if strands else []
@@ -2659,18 +2701,40 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
     _ipr_data   = (_results.get("InterProScan", {}) or {}).get("data")
     _blast_data = (_results.get("BLASTp", {}) or {}).get("data")
 
-    # Beta-solenoid analysis
+    # Structural-only analysis (for abstain decision and score display)
+    sol_struct = _analyze_fold_type(strands, ca_coords, plddt, seq,
+                                    dssp_available=dssp_ok,
+                                    ipr_data=None, blast_data=None,
+                                    ss_pct=ss)
+    # Full analysis with sequence evidence
     sol_analysis = _analyze_fold_type(strands, ca_coords, plddt, seq,
-                                     dssp_available=dssp_ok,
-                                     ipr_data=_ipr_data,
-                                     blast_data=_blast_data,
-                                     ss_pct=ss)
-    seq_len      = len(seq) or len(plddt) or 1
+                                      dssp_available=dssp_ok,
+                                      ipr_data=_ipr_data,
+                                      blast_data=_blast_data,
+                                      ss_pct=ss)
+    # Apply abstain: if structural score for the winning fold is below threshold,
+    # override the final call regardless of sequence support
+    if (sol_struct.get("available") and
+            sol_struct.get("fold_scores", {}).get(sol_struct.get("best_fold", ""), 0)
+            < ABSTAIN_THRESHOLD):
+        sol_analysis = dict(sol_analysis, best_fold="No confident fold assignment")
+    sol_analysis["ss_method"]    = ss_method
+    sol_analysis["is_alphafold"] = is_af
+    sol_analysis["struct_score"] = (sol_struct.get("fold_scores", {})
+                                    .get(sol_struct.get("best_fold", ""), 0))
+    seq_len = len(seq) or len(plddt) or 1
 
     col_v, col_a = st.columns([5, 4])
 
     with col_v:
         components.html(_3dmol_html(pdb_text, height=440), height=494, scrolling=False)
+        if not is_af and plddt:
+            st.markdown(
+                '<p style="color:#f59e0b;font-size:11px;margin:6px 0 0;">'
+                '⚠ B-factors in this file do not look like pLDDT — '
+                'this may be an experimental structure. Confidence track may be unreliable.</p>',
+                unsafe_allow_html=True,
+            )
         if plddt:
             st.markdown(_plddt_bar_html(plddt), unsafe_allow_html=True)
         st.markdown(_fold_classifier_html(sol_analysis, seq_len), unsafe_allow_html=True)
@@ -2687,6 +2751,11 @@ def show_structure(pdb_text: str, fasta_text, phobius_text=None) -> None:
             st.markdown(_cards(("Mean pLDDT", mean_pl, None)), unsafe_allow_html=True)
 
         if ss:
+            st.markdown(
+                f'<p style="color:#64748b;font-size:10px;margin:4px 0 2px;">'
+                f'SS method: {ss_method}</p>',
+                unsafe_allow_html=True,
+            )
             st.markdown(_ss_bars_html(ss), unsafe_allow_html=True)
         else:
             st.markdown(
@@ -2752,7 +2821,7 @@ def _parse_ipr_domains(data) -> list:
 
 def _dssp_segments(pdb_text: str) -> list:
     """Return [(start, end, type)] where type in H/E/C/D (D = pLDDT < 50)."""
-    ss_list = _run_dssp_raw(pdb_text)
+    ss_list, _ss_method = _run_dssp_raw(pdb_text)
     plddts  = _parse_pdb_plddts(pdb_text)
     n = max(len(ss_list or []), len(plddts))
     if n == 0:
