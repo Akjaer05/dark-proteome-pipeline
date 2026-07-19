@@ -3489,11 +3489,12 @@ html,body{background:#020408;width:100%;height:100%;overflow:hidden;
 }
 .dc{display:inline-block;will-change:transform,opacity;}
 </style>
+<script src="https://3Dmol.csb.pitt.edu/build/3Dmol-min.js" onerror="window._3ml_fail=true"></script>
 </head>
 <body>
 <div class="hero">
   <div class="lvis">
-    <!-- CSS animated fallback — always visible, fades out when 3Dmol loads -->
+    <!-- CSS animated fallback — always visible, fades out when 3Dmol renders -->
     <div id="css-fb" style="position:absolute;inset:0;transition:opacity 0.8s 0.1s;">
       <div class="lbg"></div>
       <div class="orb orb1"></div>
@@ -3508,10 +3509,9 @@ html,body{background:#020408;width:100%;height:100%;overflow:hidden;
       <div class="lp lp1"></div>
       <div class="lp lp2"></div>
     </div>
-    <!-- 3Dmol viewer — fades in when CDN loads successfully -->
-    <div id="mol-wrap" style="position:absolute;inset:0;opacity:0;transition:opacity 1.2s 0.2s;pointer-events:none;">
+    <!-- 3Dmol viewer — fades in after rendering -->
+    <div id="mol-wrap" style="position:absolute;inset:0;opacity:0;transition:opacity 1.2s;">
       <div id="mol-view" style="width:100%;height:100%;"></div>
-      <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 42% 50%,rgba(0,200,255,0.06) 0%,transparent 58%);pointer-events:none;z-index:10;"></div>
     </div>
     <div class="rfade"></div>
     <div class="tbfade"></div>
@@ -3539,27 +3539,26 @@ var _fb=setTimeout(function(){
 document.querySelectorAll('.chip').forEach(function(e){e.style.opacity='0';e.style.transform='translateY(6px)';});
 </script>
 <script>
+var _B64="__VASE_B64__";
 (function(){
-  var _b="__VASE_B64__";
-  if(!_b||_b.length<200)return;
-  var s=document.createElement('script');
-  s.src='https://3Dmol.csb.pitt.edu/build/3Dmol-min.js';
-  s.onload=function(){
+  if(window._3ml_fail||typeof $3Dmol==='undefined'||!_B64||_B64.length<200)return;
+  setTimeout(function(){
     try{
       var el=document.getElementById('mol-view');
       if(!el)return;
-      var v=$3Dmol.createViewer(el,{backgroundColor:'transparent'});
-      v.addModel(atob(_b),'pdb');
+      var v=$3Dmol.createViewer(el,{backgroundColor:'#000000'});
+      v.addModel(atob(_B64),'pdb');
       v.setStyle({},{cartoon:{colorscheme:'spectrum'}});
-      v.zoomTo();v.zoom(0.85);v.render();v.spin('y',0.35);
+      v.render();
+      v.zoomTo();v.zoom(1.1);v.render();
+      v.spin('y',0.5);
       document.getElementById('mol-wrap').style.opacity='1';
       setTimeout(function(){
         var fb=document.getElementById('css-fb');
         if(fb)fb.style.opacity='0';
       },900);
-    }catch(e){console.warn('3Dmol:',e);}
-  };
-  document.head.appendChild(s);
+    }catch(e){console.warn('3Dmol landing:',e);}
+  },50);
 })();
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"
